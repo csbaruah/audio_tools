@@ -147,3 +147,14 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+# dice-skit generated audio and working files
+dialogues-mp3/
+machine_gen/
+work/
+tmp/
+log/
+__pycache__/
+before.zip
+after.zip
+**/desktop.ini

@@ -1,0 +1,130 @@
+{
+  "_comment": [
+    "Settings for the dice-skit audio pipeline.",
+    "Keys starting with _ are comments and are ignored.",
+    "Delete any setting to use its built-in default.",
+    "Command-line flags (strict=0, dry_run=1, loudness=0) override this file for one run.",
+    "Paths are relative to this file's folder."
+  ],
+  "version": 1,
+  "_version": "File format version. Do not edit.",
+  "run": {
+    "_comment": "How a build behaves.",
+    "strict": true,
+    "_strict": [
+      "What to do when a line's audio is missing, corrupt or unconvertible.",
+      "true: abort and leave the old master untouched. Use for the final build.",
+      "false: skip those lines and build the rest. Use while recordings are arriving.",
+      "The four mandatory checks abort either way and cannot be switched off."
+    ],
+    "backend": "auto",
+    "_backend": [
+      "How audio files are joined.",
+      "auto: FFmpeg if installed, else the built-in joiner (recommended).",
+      "ffmpeg: always FFmpeg; fails if it is not installed.",
+      "python: built-in joiner; no FFmpeg needed, MP3 only."
+    ],
+    "batch_size": null,
+    "_batch_size": "null = one pass (recommended). A number, e.g. 40, only if one pass runs out of memory."
+  },
+  "paths": {
+    "_comment": "Where files are read from and written to.",
+    "csv": "dialogues_new.csv",
+    "_csv": "The script: lines, order, fillers, background scores.",
+    "human_gen": "human_gen",
+    "_human_gen": "Recorded takes and named sound files.",
+    "machine_gen": "machine_gen",
+    "_machine_gen": "TTS-generated takes.",
+    "work": "work",
+    "_work": "Caches and generated silence. Safe to delete; rebuilt on the next run.",
+    "log": "log",
+    "_log": "One log file per run.",
+    "output": "dialogues-mp3",
+    "_output": "Holds only the finished master.",
+    "master": "master_dialogues.mp3",
+    "_master": "Master filename, inside the output folder.",
+    "search_order": [
+      "human_gen",
+      "machine_gen"
+    ],
+    "_search_order": "When both folders hold a file for the same take, the first listed wins."
+  },
+  "output": {
+    "_comment": "Format of the master and of every piece in it.",
+    "format": "mp3",
+    "_format": "Only mp3 is supported today.",
+    "sample_rate": 24000,
+    "_sample_rate": [
+      "Hz. 24000 matches the TTS output, so those files need no conversion (recommended for speech).",
+      "44100 or 48000 suit music-heavy productions, but every TTS line must then be converted.",
+      "Also allowed: 16000, 22050, 32000."
+    ],
+    "bitrate": 128000,
+    "_bitrate": [
+      "Bits per second. Higher means better quality and a bigger file.",
+      "At 16000-24000 Hz: 8000-160000; 128000 is clear speech.",
+      "At 32000-48000 Hz: 32000-320000; 192000 or more suits music."
+    ],
+    "mono": true,
+    "_mono": "true: right for dialogue. false: stereo, only if stereo music width matters; about twice the size."
+  },
+  "fillers": {
+    "_comment": "Generated silence between lines, always in the output format above.",
+    "short_seconds": 2.0,
+    "_short_seconds": [
+      "Gap before each line whose filler_before cell is empty.",
+      "1-1.5 brisk, 2 natural (default), 3+ slow and dramatic.",
+      "Applies to almost every line: +1 s on 154 lines adds about 2.5 minutes."
+    ],
+    "long_seconds": 10.0,
+    "_long_seconds": "Length of long_filler.mp3, for rows that name it, e.g. a scene change."
+  },
+  "background_score": {
+    "_comment": "Music under a line (doc section 10). Only affects rows with background_score and score_cues filled in.",
+    "duck_db": -14.0,
+    "_duck_db": "How far the faded track is turned down, below 0. -6 subtle, -14 faint but audible (default), -20 almost silent.",
+    "ramp_seconds": 0.3,
+    "_ramp_seconds": "Crossfade length. 0.1 quick, 0.3 smooth (default), 1.0 slow. Keep it shorter than your shortest cue segment.",
+    "match_loudness": true,
+    "_match_loudness": "true: bring the music to the line's loudness before mixing (recommended). false: only if the music is pre-mastered to sit under dialogue.",
+    "limit": 0.95,
+    "_limit": "Peak ceiling for the mix, 0.5-1.0 of full scale. Lower only if mixes sound distorted."
+  },
+  "loudness": {
+    "_comment": "Even out volume across lines (doc section 11). Dialogue only; fillers, sound effects and music keep their levels.",
+    "enabled": true,
+    "_enabled": "false leaves each line at its recorded level; useful for comparing. Same as loudness=0 on the command line.",
+    "target_lufs": -19.0,
+    "_target_lufs": [
+      "Closer to 0 is louder.",
+      "-16 loud: phone speakers, noisy places; more lines get limited.",
+      "-19 balanced for speech (default). -23 broadcast standard; quieter, very little limiting."
+    ],
+    "true_peak_dbfs": -1.0,
+    "_true_peak_dbfs": "Highest allowed peak. -1 default; -2 if the master will be re-encoded later, e.g. by an upload platform."
+  },
+  "tts": {
+    "_comment": "Generating lines with Sarvam (generate_mp3.py). The API key is never stored in this file.",
+    "enabled": false,
+    "_enabled": "true generates missing lines and uses API credit.",
+    "api_key_source": "env",
+    "_api_key_source": "env: SARVAM_API_KEY from .env (today). keyring: Windows Credential Manager (recommended once a GUI exists).",
+    "language": "en-IN",
+    "_language": "Language and accent, e.g. en-IN (Indian English), hi-IN (Hindi). See Sarvam's documentation.",
+    "model": "bulbul:v3",
+    "_model": "Sarvam voice model.",
+    "pace": 1.0,
+    "_pace": "Speaking speed. 1.0 normal; lower is slower. See Sarvam's documentation for the range.",
+    "sample_rate": 24000,
+    "_sample_rate": "Rate requested from TTS. Keep it equal to output.sample_rate so generated lines need no conversion.",
+    "overwrite_existing": false,
+    "_overwrite_existing": "true regenerates every line, e.g. after changing voice or pace. Uses API credit."
+  },
+  "drive": {
+    "_comment": "Downloading recordings (fetch_drive.py).",
+    "folder_url": null,
+    "_folder_url": "Shared Google Drive folder link. null means pass it on the command line.",
+    "use_cookies": false,
+    "_use_cookies": "true only if the folder is not link-shared and needs your browser login."
+  }
+}

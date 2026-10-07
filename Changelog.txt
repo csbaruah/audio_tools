@@ -1,0 +1,107 @@
+DICE-SKIT CHANGELOG
+===================
+
+Newest first. Dates are when each change was made (local time; times in the
+Sep 11 entries are UTC). Section numbers (sec.) refer to
+docs\audio-concat-study.md.
+
+
+2026-10-05  README.txt and Changelog.txt
+    Added a user guide covering the tool's features, installation, use without
+    configuration, command-line and dice-skit.json options, the Sarvam key
+    setup and each file's role. Added this changelog.
+
+2026-10-05  Original script deleted
+    Removed stitch_aud.py, the unused pre-split script. It no longer compiled
+    and held stale settings copies; everything it did now lives in the current
+    modules. Copies remain in backup\v2 to v9. Recorded in sec. 5.1.
+
+2026-10-05  Settings file: dice-skit.json (sec. 12)
+    All 33 settings moved from Python constants to a commented JSON file,
+    checked on load: typos, wrong types and out-of-range values stop the run.
+    The command line still overrides it. The run log records each value's
+    source. The API key is never stored there.
+
+2026-10-05  Uniform dialogue loudness (sec. 11)
+    Every line is measured and given one fixed gain to -19 LUFS, with a -1 dBFS
+    peak limit, before mixing and joining. Measured spread fell from 10.0 dB to
+    0.1 dB. Corrects the encoder's 0.4 dB loss. loudness=0 turns it off for one
+    run.
+
+2026-10-05  Settings and API-key design (sec. 12)
+    Specified the JSON settings file: "_" keys as comments, GUI-safe saving,
+    and what stays out. Tested Windows DPAPI encryption. Decided the Sarvam key
+    never goes in the file; tts.api_key_source points to .env or Windows
+    Credential Manager.
+
+2026-10-05  Loudness problem found (sec. 11)
+    Measured all 15 lines: a 10 dB spread between the loudest and quietest,
+    varying by recording rather than by character. Found 0-SAMAY.mp3 already
+    clipped. Proposed per-line leveling to a common target.
+
+2026-10-05  Background score under a line (sec. 10)
+    New background_score and score_cues CSV columns mix music under a line. Cue
+    strings like b-2s-m-10s-b-5s set which track is loud when; t- starts both
+    together. Faded track -14 dB, never silent. Mixes cached. Faults follow the
+    strict rules.
+
+2026-10-05  Background score designed and prototyped
+    Proved overlay mixing feasible with FFmpeg and agreed the cue-string rules:
+    first track solo, quiet track faint but audible, nothing trimmed, music back
+    to full volume when the line ends. Trial mixes generated in human_gen\.
+
+2026-10-05  Filler columns kept
+    Reviewed moving sound effects into rows of their own and rejected it: it
+    would change the loader, file matching, gap rules and TTS just to express
+    four cues. The filler_before and filler_after columns stay.
+
+2026-10-04  Automatic versioned backups
+    A Claude Code hook copies every source file into backup\vN before the first
+    edit of each request, skipping unchanged snapshots. backup\v1 holds the
+    files from before the mandatory checks.
+
+2026-10-04  Mandatory checks and dry run (sec. 9)
+    Four checks now always abort, whatever strict says: CSV missing, character
+    name mismatch, no character name, two files for one take. Added dry_run=1
+    to run every check without building. Every fault is reported in one pass.
+
+2026-09-14  Script-revision rules specified (sec. 9)
+    Treat each take number as a permanent ID: never renumber; reorder by moving
+    rows; new lines get the next free number. Specified the four mandatory
+    checks and the dry-run behaviour, then not yet built.
+
+2026-09-11  Trailing fillers and "no gap"
+    Added the filler_after column, empty meaning nothing appended, and a
+    generated 10-second long_filler.mp3. "N" in filler_before removes the gap
+    before a line.
+
+2026-09-11  Two source folders and run logs
+    Audio is now read from human_gen\ (recordings, preferred) and machine_gen\
+    (TTS); dialogues-mp3\ holds only the master. Each run writes a log with
+    every warning and a per-line source table.
+
+2026-09-11  Google Drive download and setup guide
+    Added fetch_drive.py to download recordings from a shared Drive folder,
+    with truststore for corporate HTTPS inspection. Added the new-PC setup
+    guide (sec. 0).
+
+2026-09-11  Per-row leading fillers (sec. 8)
+    Added the filler_before column: empty gives a 2-second pause, a filename
+    plays that audio before the line. The separate intro setting was removed;
+    the opening music is now row 0's filler.
+
+2026-09-11  .m4a/.aac/.mp4 support and flexible names (sec. 7)
+    Non-MP3 inputs are converted to 24 kHz mono 128 kbps MP3 and cached. Files
+    match their row by leading take number alone, so names like
+    129_Krishna.m4a work.
+
+2026-09-11  strict mode
+    Added strict=0 to build from whatever audio exists and report the rest;
+    strict=1, the default, aborts without touching the master. The existing
+    row limit (e.g. python stitch_mp3.py 20) was kept.
+
+2026-09-11  Pipeline split and FFmpeg-free joining (sec. 1-6)
+    Split stitch_aud.py into generate_mp3.py (TTS, disabled), stitch_mp3.py and
+    shared modules. Added a built-in MP3 joiner needing no FFmpeg. Found the
+    intro's 22,050 Hz rate clashing with 24,000 Hz dialogue and added a
+    pre-flight format check.
