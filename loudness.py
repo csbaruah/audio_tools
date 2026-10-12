@@ -21,10 +21,10 @@ Needs FFmpeg.
 import hashlib
 import json
 import re
-import subprocess
 from pathlib import Path
 
 import audio_common as common
+import audio_tools
 from concat_backends import atomic_install, temp_path_for
 
 
@@ -47,12 +47,7 @@ _DURATION = re.compile(r"time=(\d+):(\d+):(\d+(?:\.\d+)?)")
 
 
 def _run(command):
-    return subprocess.run(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+    return audio_tools.run(command)
 
 
 def _fold():
@@ -239,7 +234,8 @@ def _render(source, gain, target):
 
     # level=disabled: the limiter's auto-level would otherwise undo the gain.
     graph = (
-        f"{_fold()},volume={gain:.2f}dB," f"alimiter=limit={ceiling:.4f}:level=disabled"
+        f"{_fold()},volume={gain:.2f}dB,"
+        f"alimiter=limit={ceiling:.4f}:level=disabled"
     )
 
     target.parent.mkdir(parents=True, exist_ok=True)

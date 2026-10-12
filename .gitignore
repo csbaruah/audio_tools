@@ -154,6 +154,7 @@ machine_gen/
 work/
 tmp/
 log/
+/output/
 __pycache__/
 before.zip
 after.zip

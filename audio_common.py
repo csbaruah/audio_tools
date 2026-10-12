@@ -16,12 +16,13 @@ without any external binary.
 
 import csv
 import re
-import shutil
-import subprocess
 import sys
 from collections import namedtuple
 from datetime import datetime
 from pathlib import Path
+
+import audio_tools
+
 
 # ============================================================
 # CONFIGURATION
@@ -34,26 +35,44 @@ from pathlib import Path
 
 import settings as _settings
 
-try:
-    SETTINGS, SETTINGS_SOURCES = _settings.load()
-except _settings.SettingsError as _exc:
-    # Fail before any audio is touched, with the message alone.
-    print(f"ERROR in settings: {_exc}", file=sys.stderr)
-    sys.exit(1)
+# The folder holding this code. Used as the project folder when the scripts
+# are run from the command line, which is how they have always worked.
+CODE_DIRECTORY = Path(__file__).resolve().parent
 
-_RUN = SETTINGS["run"]
-_PATHS = SETTINGS["paths"]
-_OUTPUT = SETTINGS["output"]
-_FILLERS = SETTINGS["fillers"]
-_SCORE = SETTINGS["background_score"]
-_LOUDNESS = SETTINGS["loudness"]
-_TTS = SETTINGS["tts"]
+# Extensions accepted as dialogue audio. Anything that is not already an MP3
+# in the target format below is transcoded once into NORMALIZED_DIRECTORY
+# before stitching; see concat_backends.normalize_input().
+INPUT_EXTENSIONS = (
+    ".mp3",
+    ".m4a",
+    ".mp4",
+    ".aac",
+    ".wav",
+    ".flac",
+    ".ogg",
+    ".opus",
+    ".wma",
+)
 
-# All paths are anchored to this script's directory rather than the current
-# working directory, so the pipeline behaves the same no matter where it is
-# invoked from. Relative paths in dice-skit.json are relative to that same
-# directory.
-BASE_DIRECTORY = Path(__file__).resolve().parent
+
+# Every name configure() binds. Listed so the global statement below stays in
+# step with the assignments.
+_CONFIGURED = (
+    "SETTINGS", "SETTINGS_SOURCES", "BASE_DIRECTORY", "SETTINGS_FILE",
+    "_RUN", "_PATHS", "_OUTPUT", "_FILLERS", "_SCORE", "_LOUDNESS", "_TTS",
+    "INPUT_DIRECTORY", "IN_OUT_DIRECTORY", "OUTPUT_DIRECTORY",
+    "CSV_FILE", "OUT_DIRECTORY", "HUMAN_GEN_DIRECTORY", "MACHINE_GEN_DIRECTORY",
+    "WORK_DIRECTORY", "LOG_DIRECTORY", "MASTER_FILE", "_SOURCE_DIRECTORIES",
+    "TTS_ENABLED", "TTS_API_KEY_SOURCE", "LANGUAGE_CODE", "MODEL", "PACE",
+    "SPEECH_SAMPLE_RATE", "OUTPUT_AUDIO_CODEC", "OVERWRITE_EXISTING",
+    "SHORT_FILLER", "SHORT_FILLER_SECONDS", "LONG_FILLER", "LONG_FILLER_SECONDS",
+    "GENERATED_FILLERS", "CONCAT_BACKEND", "OUTPUT_FORMAT",
+    "TARGET_SAMPLE_RATE", "TARGET_BITRATE", "TARGET_MONO", "FILLER_BITRATE",
+    "NORMALIZED_DIRECTORY", "DIALOGUE_LOUDNESS", "DIALOGUE_TARGET_LUFS",
+    "DIALOGUE_TRUE_PEAK_DBFS", "LOUDNESS_DIRECTORY", "MIXED_DIRECTORY",
+    "SCORE_DUCK_DB", "SCORE_RAMP_SECONDS", "SCORE_MATCH_LOUDNESS", "SCORE_LIMIT",
+    "STRICT_MISSING", "BATCH_SIZE",
+)
 
 
 def _path(value):
@@ -62,36 +81,278 @@ def _path(value):
     return path if path.is_absolute() else BASE_DIRECTORY / path
 
 
-# The dialogue manifest. Lowercase, matching the file actually on disk.
-CSV_FILE = _path(_PATHS["csv"])
+def _under(parent, value):
+    """
+    `value` resolved inside `parent`, unless it is absolute.
+    """
+    path = Path(value)
 
-# Destination for the finished master, and nothing else. This directory is
-# deliberately NOT a source: it is never searched for dialogue audio.
-OUT_DIRECTORY = _path(_PATHS["output"])
+    return path if path.is_absolute() else parent / path
 
-# Human-recorded dialogue, fetched from Google Drive by fetch_drive.py. A flat
-# folder of .mp3/.m4a files whose names start with the sequence number they
-# satisfy; Drive's subfolder structure is not preserved. Named filler audio
-# (sound effects, opening music) lives here too.
-HUMAN_GEN_DIRECTORY = _path(_PATHS["human_gen"])
 
-# Machine-generated dialogue, i.e. Sarvam TTS output from generate_mp3.py.
-# Same flat, sequence-number-prefixed convention.
-MACHINE_GEN_DIRECTORY = _path(_PATHS["machine_gen"])
+def _check_layout(input_dir, in_out_dir, output_dir):
+    """
+    Refuse an output folder that overlaps an input folder: "clean" deletes
+    inside output, so an overlap could delete recordings.
+    """
+    out = output_dir.resolve()
 
-# Derived artifacts: generated silence and the transcode cache. Everything here
-# is rebuildable and safe to delete.
-WORK_DIRECTORY = _path(_PATHS["work"])
+    for name, other in (("input", input_dir), ("in_out", in_out_dir)):
+        other = other.resolve()
 
-# Per-run logs, one file per invocation: log/run<YYYYmmdd-HHMMSS>.log
-LOG_DIRECTORY = _path(_PATHS["log"])
+        if out == other or out in other.parents or other in out.parents:
+            raise _settings.SettingsError(
+                f"paths.output ({output_dir}) must not be the same as, inside, "
+                f"or contain paths.{name} ({other})"
+            )
 
-MASTER_FILE = OUT_DIRECTORY / _PATHS["master"]
 
-_SOURCE_DIRECTORIES = {
-    "human_gen": HUMAN_GEN_DIRECTORY,
-    "machine_gen": MACHINE_GEN_DIRECTORY,
-}
+def configure(project=None):
+    """
+    Bind every setting below for one project folder.
+
+    `project` holds dialogues_new.csv, human_gen/, machine_gen/ and, if it
+    has one, dice-skit.json. Relative paths in that file are relative to the
+    project. None means the folder holding this code, which is what the
+    command-line scripts use.
+
+    Raises settings.SettingsError for an invalid dice-skit.json, leaving the
+    previous configuration in place.
+    """
+    global SETTINGS, SETTINGS_SOURCES, BASE_DIRECTORY, SETTINGS_FILE
+    global _RUN, _PATHS, _OUTPUT, _FILLERS, _SCORE, _LOUDNESS, _TTS
+    global INPUT_DIRECTORY, IN_OUT_DIRECTORY, OUTPUT_DIRECTORY
+    global CSV_FILE, OUT_DIRECTORY, HUMAN_GEN_DIRECTORY, MACHINE_GEN_DIRECTORY
+    global WORK_DIRECTORY, LOG_DIRECTORY, MASTER_FILE, _SOURCE_DIRECTORIES
+    global TTS_ENABLED, TTS_API_KEY_SOURCE, LANGUAGE_CODE, MODEL, PACE
+    global SPEECH_SAMPLE_RATE, OUTPUT_AUDIO_CODEC, OVERWRITE_EXISTING
+    global SHORT_FILLER, SHORT_FILLER_SECONDS, LONG_FILLER, LONG_FILLER_SECONDS
+    global GENERATED_FILLERS, CONCAT_BACKEND, OUTPUT_FORMAT
+    global TARGET_SAMPLE_RATE, TARGET_BITRATE, TARGET_MONO, FILLER_BITRATE
+    global NORMALIZED_DIRECTORY, DIALOGUE_LOUDNESS, DIALOGUE_TARGET_LUFS
+    global DIALOGUE_TRUE_PEAK_DBFS, LOUDNESS_DIRECTORY, MIXED_DIRECTORY
+    global SCORE_DUCK_DB, SCORE_RAMP_SECONDS, SCORE_MATCH_LOUDNESS, SCORE_LIMIT
+    global STRICT_MISSING, BATCH_SIZE
+
+    project = Path(project).resolve() if project else CODE_DIRECTORY
+    settings_file = project / _settings.SETTINGS_FILE.name
+
+    # An old-layout project (everything at the top) is moved into input /
+    # in-out / output on its first run, before its settings are read
+    # (doc section 14). layout.migrate() moves nothing if any destination
+    # already exists, and puts things back if a move fails.
+    import layout
+
+    if layout.needs_migration(project):
+        layout.migrate(project)
+
+    # Load first: a bad file must not leave half the names rebound.
+    loaded, sources = _settings.load(settings_file)
+
+    SETTINGS, SETTINGS_SOURCES = loaded, sources
+    SETTINGS_FILE = settings_file
+
+    # All paths are anchored to the project folder rather than the current
+    # working directory, so the pipeline behaves the same no matter where it
+    # is invoked from.
+    BASE_DIRECTORY = project
+
+    _RUN = SETTINGS["run"]
+    _PATHS = SETTINGS["paths"]
+    _OUTPUT = SETTINGS["output"]
+    _FILLERS = SETTINGS["fillers"]
+    _SCORE = SETTINGS["background_score"]
+    _LOUDNESS = SETTINGS["loudness"]
+    _TTS = SETTINGS["tts"]
+
+
+    # The three top-level folders (doc section 14). Each may be relative to
+    # the project or absolute.
+    INPUT_DIRECTORY = _path(_PATHS["input"])
+    IN_OUT_DIRECTORY = _path(_PATHS["in_out"])
+    OUTPUT_DIRECTORY = _path(_PATHS["output"])
+
+    _check_layout(INPUT_DIRECTORY, IN_OUT_DIRECTORY, OUTPUT_DIRECTORY)
+
+    # The dialogue manifest, inside input.
+    CSV_FILE = _under(INPUT_DIRECTORY, _PATHS["csv"])
+
+    # Human-recorded dialogue, fetched from Google Drive by fetch_drive.py. A flat
+    # folder of .mp3/.m4a files whose names start with the sequence number they
+    # satisfy; Drive's subfolder structure is not preserved. Named filler audio
+    # (sound effects, opening music) lives here too.
+    HUMAN_GEN_DIRECTORY = _under(INPUT_DIRECTORY, _PATHS["human_gen"])
+
+    # Machine-generated dialogue, i.e. Sarvam TTS output from generate_mp3.py.
+    # Written by one stage and read by another, so it lives in in-out.
+    MACHINE_GEN_DIRECTORY = _under(IN_OUT_DIRECTORY, _PATHS["machine_gen"])
+
+    # Destination for the finished master, and nothing else. This directory is
+    # deliberately NOT a source: it is never searched for dialogue audio. The
+    # name OUT_DIRECTORY is kept for the code that already uses it.
+    OUT_DIRECTORY = _under(OUTPUT_DIRECTORY, _PATHS["master_dir"])
+
+    # Derived artifacts: generated silence and the transcode cache. Everything here
+    # is rebuildable and safe to delete.
+    WORK_DIRECTORY = _under(OUTPUT_DIRECTORY, _PATHS["work"])
+
+    # Per-run logs, one file per invocation: log/run<YYYYmmdd-HHMMSS>.log
+    LOG_DIRECTORY = _under(OUTPUT_DIRECTORY, _PATHS["log"])
+
+    MASTER_FILE = OUT_DIRECTORY / _PATHS["master"]
+
+
+    # ------------------------------------------------------------
+    # Sarvam TTS settings
+    #
+    # Only consumed by generate_mp3.py. The API key is NOT a setting: see
+    # TTS_API_KEY_SOURCE.
+    # ------------------------------------------------------------
+
+    TTS_ENABLED = _TTS["enabled"]
+    TTS_API_KEY_SOURCE = _TTS["api_key_source"]
+    LANGUAGE_CODE = _TTS["language"]
+    MODEL = _TTS["model"]
+    PACE = _TTS["pace"]
+    SPEECH_SAMPLE_RATE = _TTS["sample_rate"]
+    OUTPUT_AUDIO_CODEC = "mp3"
+
+    # If True, generate_mp3.py regenerates every dialogue MP3.
+    # If False, valid existing MP3s are reused.
+    OVERWRITE_EXISTING = _TTS["overwrite_existing"]
+
+    # ------------------------------------------------------------
+    # Fillers
+    # ------------------------------------------------------------
+
+    # Default audio inserted before a dialogue line when the CSV's
+    # "filler_before" cell is empty. Generated, so it lives with the other derived
+    # artifacts rather than alongside source audio.
+    SHORT_FILLER = WORK_DIRECTORY / "short_filler.mp3"
+
+    SHORT_FILLER_SECONDS = _FILLERS["short_seconds"]
+
+    # A longer generated gap. Not used by default: it enters the sequence only when
+    # a row names it in "filler_before" or "filler_after", and is synthesised on
+    # demand at that point (see GENERATED_FILLERS).
+    LONG_FILLER = WORK_DIRECTORY / "long_filler.mp3"
+    LONG_FILLER_SECONDS = _FILLERS["long_seconds"]
+
+    # Fillers this pipeline synthesises rather than expects on disk, keyed by the
+    # filename a CSV cell would use to name one. A row may reference either by
+    # name; the stitch stage creates whichever ones are actually referenced before
+    # resolving row fillers, so the CSV can call for a 10-second gap without anyone
+    # having to produce long_filler.mp3 by hand.
+    GENERATED_FILLERS = {
+        SHORT_FILLER.name: (SHORT_FILLER, SHORT_FILLER_SECONDS),
+        LONG_FILLER.name: (LONG_FILLER, LONG_FILLER_SECONDS),
+    }
+
+    # ------------------------------------------------------------
+    # Stitching
+    # ------------------------------------------------------------
+
+    # Which concatenation backend to use:
+    #
+    #   "auto"    prefer ffmpeg when it is on PATH (proven, format-agnostic),
+    #             otherwise fall back to the pure-Python MP3 splicer
+    #   "ffmpeg"  force the ffmpeg concat demuxer
+    #   "python"  force the dependency-free MP3 frame splicer (MP3 only)
+    #
+    # See docs/audio-concat-study.md for why both exist.
+    CONCAT_BACKEND = _RUN["backend"]
+
+    # Container/codec of the stitched master.
+    # Anything other than "mp3" forces the ffmpeg backend, because non-MP3
+    # containers cannot be spliced at the byte level.
+    OUTPUT_FORMAT = _OUTPUT["format"]
+
+    # ------------------------------------------------------------
+    # Input formats and normalisation target
+    # ------------------------------------------------------------
+
+
+    # The one audio format every segment must share before it can be spliced.
+    #
+    # The default matches the Sarvam TTS output, which is the bulk of the
+    # material: keeping it there means those files need no transcode at all and
+    # stay on the lossless stream-copy path. Inputs at other rates (44.1 kHz .m4a
+    # files, the 22.05 kHz intro) are resampled to this once and cached.
+    TARGET_SAMPLE_RATE = _OUTPUT["sample_rate"]
+    TARGET_BITRATE = _OUTPUT["bitrate"]
+    TARGET_MONO = _OUTPUT["mono"]
+
+    # Generated silence is written in the target format, so fillers always join by
+    # stream copy.
+    FILLER_BITRATE = TARGET_BITRATE
+
+    # Cache for transcoded inputs, under the work directory so that no source or
+    # output directory is polluted with derived files.
+    NORMALIZED_DIRECTORY = WORK_DIRECTORY / "normalized"
+
+    # ------------------------------------------------------------
+    # Dialogue loudness (docs/audio-concat-study.md section 11)
+    # ------------------------------------------------------------
+
+    # Bring every dialogue line to one loudness before mixing and stitching.
+    # Overridable per run from the command line: `loudness=0` / `loudness=1`.
+    DIALOGUE_LOUDNESS = _LOUDNESS["enabled"]
+
+    # Integrated loudness every line is brought to, in LUFS.
+    DIALOGUE_TARGET_LUFS = _LOUDNESS["target_lufs"]
+
+    # True-peak ceiling after the gain, in dBFS. The limiter acts only where the
+    # gain would push a peak past it.
+    DIALOGUE_TRUE_PEAK_DBFS = _LOUDNESS["true_peak_dbfs"]
+
+    # Cache for loudness-matched dialogue.
+    LOUDNESS_DIRECTORY = WORK_DIRECTORY / "loudness"
+
+    # ------------------------------------------------------------
+    # Background score (docs/audio-concat-study.md section 10)
+    # ------------------------------------------------------------
+
+    # Cache for dialogue rows mixed with a background score.
+    MIXED_DIRECTORY = WORK_DIRECTORY / "mixed"
+
+    # How far the non-prominent track is turned down. Quieter, never silent: the
+    # faded track must stay faintly audible. Tune by ear.
+    SCORE_DUCK_DB = _SCORE["duck_db"]
+
+    # Length of the linear volume ramp at every change of prominent track.
+    SCORE_RAMP_SECONDS = _SCORE["ramp_seconds"]
+
+    # Before mixing, the background is gained to match the dialogue's integrated
+    # loudness, so that "prominent" reliably means "louder".
+    SCORE_MATCH_LOUDNESS = _SCORE["match_loudness"]
+
+    # Peak ceiling for the summed mix, as a linear fraction of full scale.
+    SCORE_LIMIT = _SCORE["limit"]
+
+
+    # What to do when an expected dialogue MP3 is missing, corrupt, or in a
+    # mismatched audio format:
+    #
+    #   True   pre-flight the whole set, print one consolidated report, abort
+    #          without writing a master
+    #   False  warn per file, drop it, stitch the remainder
+    #
+    # Overridable per run from the command line: `strict=0` / `strict=1`.
+    STRICT_MISSING = _RUN["strict"]
+
+    # Number of dialogue files per intermediate batch.
+    #
+    # None means "single pass": build one concat list for the whole sequence.
+    # Set to an integer (e.g. 40) to restore the original batch-and-append
+    # behaviour, which rewrites the entire master once per batch.
+    BATCH_SIZE = _RUN["batch_size"]
+
+    _SOURCE_DIRECTORIES = {
+        "human_gen": HUMAN_GEN_DIRECTORY,
+        "machine_gen": MACHINE_GEN_DIRECTORY,
+    }
+
+    return project
 
 
 def search_directories():
@@ -113,164 +374,12 @@ def search_directories():
     return tuple(_SOURCE_DIRECTORIES[name] for name in _PATHS["search_order"])
 
 
-# ------------------------------------------------------------
-# Sarvam TTS settings
-#
-# Only consumed by generate_mp3.py. The API key is NOT a setting: see
-# TTS_API_KEY_SOURCE.
-# ------------------------------------------------------------
-
-TTS_ENABLED = _TTS["enabled"]
-TTS_API_KEY_SOURCE = _TTS["api_key_source"]
-LANGUAGE_CODE = _TTS["language"]
-MODEL = _TTS["model"]
-PACE = _TTS["pace"]
-SPEECH_SAMPLE_RATE = _TTS["sample_rate"]
-OUTPUT_AUDIO_CODEC = "mp3"
-
-# If True, generate_mp3.py regenerates every dialogue MP3.
-# If False, valid existing MP3s are reused.
-OVERWRITE_EXISTING = _TTS["overwrite_existing"]
-
-# ------------------------------------------------------------
-# Fillers
-# ------------------------------------------------------------
-
-# Default audio inserted before a dialogue line when the CSV's
-# "filler_before" cell is empty. Generated, so it lives with the other derived
-# artifacts rather than alongside source audio.
-SHORT_FILLER = WORK_DIRECTORY / "short_filler.mp3"
-
-SHORT_FILLER_SECONDS = _FILLERS["short_seconds"]
-
-# A longer generated gap. Not used by default: it enters the sequence only when
-# a row names it in "filler_before" or "filler_after", and is synthesised on
-# demand at that point (see GENERATED_FILLERS).
-LONG_FILLER = WORK_DIRECTORY / "long_filler.mp3"
-LONG_FILLER_SECONDS = _FILLERS["long_seconds"]
-
-# Fillers this pipeline synthesises rather than expects on disk, keyed by the
-# filename a CSV cell would use to name one. A row may reference either by
-# name; the stitch stage creates whichever ones are actually referenced before
-# resolving row fillers, so the CSV can call for a 10-second gap without anyone
-# having to produce long_filler.mp3 by hand.
-GENERATED_FILLERS = {
-    SHORT_FILLER.name: (SHORT_FILLER, SHORT_FILLER_SECONDS),
-    LONG_FILLER.name: (LONG_FILLER, LONG_FILLER_SECONDS),
-}
-
-# ------------------------------------------------------------
-# Stitching
-# ------------------------------------------------------------
-
-# Which concatenation backend to use:
-#
-#   "auto"    prefer ffmpeg when it is on PATH (proven, format-agnostic),
-#             otherwise fall back to the pure-Python MP3 splicer
-#   "ffmpeg"  force the ffmpeg concat demuxer
-#   "python"  force the dependency-free MP3 frame splicer (MP3 only)
-#
-# See docs/audio-concat-study.md for why both exist.
-CONCAT_BACKEND = _RUN["backend"]
-
-# Container/codec of the stitched master.
-# Anything other than "mp3" forces the ffmpeg backend, because non-MP3
-# containers cannot be spliced at the byte level.
-OUTPUT_FORMAT = _OUTPUT["format"]
-
-# ------------------------------------------------------------
-# Input formats and normalisation target
-# ------------------------------------------------------------
-
-# Extensions accepted as dialogue audio. Anything that is not already an MP3
-# in the target format below is transcoded once into NORMALIZED_DIRECTORY
-# before stitching; see concat_backends.normalize_input().
-INPUT_EXTENSIONS = (
-    ".mp3",
-    ".m4a",
-    ".mp4",
-    ".aac",
-    ".wav",
-    ".flac",
-    ".ogg",
-    ".opus",
-    ".wma",
-)
-
-# The one audio format every segment must share before it can be spliced.
-#
-# The default matches the Sarvam TTS output, which is the bulk of the
-# material: keeping it there means those files need no transcode at all and
-# stay on the lossless stream-copy path. Inputs at other rates (44.1 kHz .m4a
-# files, the 22.05 kHz intro) are resampled to this once and cached.
-TARGET_SAMPLE_RATE = _OUTPUT["sample_rate"]
-TARGET_BITRATE = _OUTPUT["bitrate"]
-TARGET_MONO = _OUTPUT["mono"]
-
-# Generated silence is written in the target format, so fillers always join by
-# stream copy.
-FILLER_BITRATE = TARGET_BITRATE
-
-# Cache for transcoded inputs, under the work directory so that no source or
-# output directory is polluted with derived files.
-NORMALIZED_DIRECTORY = WORK_DIRECTORY / "normalized"
-
-# ------------------------------------------------------------
-# Dialogue loudness (docs/audio-concat-study.md section 11)
-# ------------------------------------------------------------
-
-# Bring every dialogue line to one loudness before mixing and stitching.
-# Overridable per run from the command line: `loudness=0` / `loudness=1`.
-DIALOGUE_LOUDNESS = _LOUDNESS["enabled"]
-
-# Integrated loudness every line is brought to, in LUFS.
-DIALOGUE_TARGET_LUFS = _LOUDNESS["target_lufs"]
-
-# True-peak ceiling after the gain, in dBFS. The limiter acts only where the
-# gain would push a peak past it.
-DIALOGUE_TRUE_PEAK_DBFS = _LOUDNESS["true_peak_dbfs"]
-
-# Cache for loudness-matched dialogue.
-LOUDNESS_DIRECTORY = WORK_DIRECTORY / "loudness"
-
-# ------------------------------------------------------------
-# Background score (docs/audio-concat-study.md section 10)
-# ------------------------------------------------------------
-
-# Cache for dialogue rows mixed with a background score.
-MIXED_DIRECTORY = WORK_DIRECTORY / "mixed"
-
-# How far the non-prominent track is turned down. Quieter, never silent: the
-# faded track must stay faintly audible. Tune by ear.
-SCORE_DUCK_DB = _SCORE["duck_db"]
-
-# Length of the linear volume ramp at every change of prominent track.
-SCORE_RAMP_SECONDS = _SCORE["ramp_seconds"]
-
-# Before mixing, the background is gained to match the dialogue's integrated
-# loudness, so that "prominent" reliably means "louder".
-SCORE_MATCH_LOUDNESS = _SCORE["match_loudness"]
-
-# Peak ceiling for the summed mix, as a linear fraction of full scale.
-SCORE_LIMIT = _SCORE["limit"]
-
-
-# What to do when an expected dialogue MP3 is missing, corrupt, or in a
-# mismatched audio format:
-#
-#   True   pre-flight the whole set, print one consolidated report, abort
-#          without writing a master
-#   False  warn per file, drop it, stitch the remainder
-#
-# Overridable per run from the command line: `strict=0` / `strict=1`.
-STRICT_MISSING = _RUN["strict"]
-
-# Number of dialogue files per intermediate batch.
-#
-# None means "single pass": build one concat list for the whole sequence.
-# Set to an integer (e.g. 40) to restore the original batch-and-append
-# behaviour, which rewrites the entire master once per batch.
-BATCH_SIZE = _RUN["batch_size"]
+try:
+    configure()
+except _settings.SettingsError as _exc:
+    # Fail before any audio is touched, with the message alone.
+    print(f"ERROR in settings: {_exc}", file=sys.stderr)
+    sys.exit(1)
 
 
 # ============================================================
@@ -334,7 +443,9 @@ def start_run_log(name="run"):
 
     _log_handle = open(_log_path, "w", encoding="utf-8", newline="\n")
 
-    _log_handle.write(f"{name} log - {datetime.now().isoformat(timespec='seconds')}\n")
+    _log_handle.write(
+        f"{name} log - {datetime.now().isoformat(timespec='seconds')}\n"
+    )
     _log_handle.write(f"command: {' '.join(sys.argv)}\n")
     _log_handle.write("=" * 70 + "\n")
 
@@ -448,20 +559,17 @@ def close_run_log():
 # GENERAL HELPERS
 # ============================================================
 
-
 def run_command(command, description=None):
     """
-    Run a subprocess command and raise a useful error if it fails.
+    Run an audio tool command and raise a useful error if it fails.
+
+    Goes through audio_tools, so the tool is found by absolute path and run
+    without a shell.
     """
     if description:
         print(description)
 
-    result = subprocess.run(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+    result = audio_tools.run(command)
 
     if result.returncode != 0:
         print()
@@ -469,14 +577,17 @@ def run_command(command, description=None):
         print(" ".join(str(x) for x in command))
         print()
         print(result.stderr)
-        raise RuntimeError(f"Command failed with exit code {result.returncode}")
+        raise RuntimeError(
+            f"Command failed with exit code {result.returncode}"
+        )
 
     return result
 
 
 def have_ffmpeg():
     """
-    Return True when ffmpeg is available on PATH.
+    Return True when ffmpeg is available: bundled, or on PATH (see
+    audio_tools.find()).
 
     Unlike the original check_ffmpeg(), this reports rather than exiting, so
     the backend selector can probe for ffmpeg and fall back gracefully.
@@ -486,30 +597,24 @@ def have_ffmpeg():
 
 def have_ffprobe():
     """
-    Return True when ffprobe is available on PATH.
+    Return True when ffprobe is available: bundled, or on PATH.
     """
     return _probe_tool("ffprobe")
+
+
+# Probed once per run: the answer cannot change mid-run, and the pipeline
+# asks before every file.
+_tool_cache = {}
 
 
 def _probe_tool(name):
     """
     Confirm an external tool exists and responds to -version.
     """
-    if shutil.which(name) is None:
-        return False
+    if name not in _tool_cache:
+        _tool_cache[name] = audio_tools.available(name)
 
-    try:
-        result = subprocess.run(
-            [name, "-version"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-
-    except Exception:
-        return False
-
-    return result.returncode == 0
+    return _tool_cache[name]
 
 
 def safe_filename(text):
@@ -602,94 +707,24 @@ _SAMPLE_RATES = {
 # Bitrates in bits per second, indexed by the 4-bit bitrate index.
 # Index 0 is "free format" and index 15 is invalid; both are None here.
 _BITRATES_V1_L1 = (
-    None,
-    32,
-    64,
-    96,
-    128,
-    160,
-    192,
-    224,
-    256,
-    288,
-    320,
-    352,
-    384,
-    416,
-    448,
-    None,
+    None, 32, 64, 96, 128, 160, 192, 224,
+    256, 288, 320, 352, 384, 416, 448, None,
 )
 _BITRATES_V1_L2 = (
-    None,
-    32,
-    48,
-    56,
-    64,
-    80,
-    96,
-    112,
-    128,
-    160,
-    192,
-    224,
-    256,
-    320,
-    384,
-    None,
+    None, 32, 48, 56, 64, 80, 96, 112,
+    128, 160, 192, 224, 256, 320, 384, None,
 )
 _BITRATES_V1_L3 = (
-    None,
-    32,
-    40,
-    48,
-    56,
-    64,
-    80,
-    96,
-    112,
-    128,
-    160,
-    192,
-    224,
-    256,
-    320,
-    None,
+    None, 32, 40, 48, 56, 64, 80, 96,
+    112, 128, 160, 192, 224, 256, 320, None,
 )
 _BITRATES_V2_L1 = (
-    None,
-    32,
-    48,
-    56,
-    64,
-    80,
-    96,
-    112,
-    128,
-    144,
-    160,
-    176,
-    192,
-    224,
-    256,
-    None,
+    None, 32, 48, 56, 64, 80, 96, 112,
+    128, 144, 160, 176, 192, 224, 256, None,
 )
 _BITRATES_V2_L23 = (
-    None,
-    8,
-    16,
-    24,
-    32,
-    40,
-    48,
-    56,
-    64,
-    80,
-    96,
-    112,
-    128,
-    144,
-    160,
-    None,
+    None, 8, 16, 24, 32, 40, 48, 56,
+    64, 80, 96, 112, 128, 144, 160, None,
 )
 
 _BITRATE_TABLE = {
@@ -721,17 +756,17 @@ _SIDE_INFO_SIZE = {
 FrameHeader = namedtuple(
     "FrameHeader",
     [
-        "raw",  # the 4 header bytes, reused when synthesising frames
-        "version",  # "1" | "2" | "2.5"
-        "layer",  # 1 | 2 | 3
-        "bitrate",  # bits per second
-        "sample_rate",  # Hz
-        "channel_mode",  # 2-bit field; CHANNEL_MODE_MONO == mono
-        "protected",  # True when a 16-bit CRC follows the header
-        "padded",  # True when this frame carries a padding slot
-        "frame_length",  # total frame size in bytes, padding included
+        "raw",                # the 4 header bytes, reused when synthesising frames
+        "version",            # "1" | "2" | "2.5"
+        "layer",              # 1 | 2 | 3
+        "bitrate",            # bits per second
+        "sample_rate",        # Hz
+        "channel_mode",       # 2-bit field; CHANNEL_MODE_MONO == mono
+        "protected",          # True when a 16-bit CRC follows the header
+        "padded",             # True when this frame carries a padding slot
+        "frame_length",       # total frame size in bytes, padding included
         "samples_per_frame",
-        "side_info_size",  # Layer III side info length, 0 for other layers
+        "side_info_size",     # Layer III side info length, 0 for other layers
     ],
 )
 
@@ -753,7 +788,7 @@ def parse_frame_header(data, offset=0):
     if offset + 4 > len(data):
         return None
 
-    b0, b1, b2, b3 = data[offset : offset + 4]
+    b0, b1, b2, b3 = data[offset:offset + 4]
 
     # 11-bit frame sync.
     if b0 != 0xFF or (b1 & 0xE0) != 0xE0:
@@ -813,7 +848,7 @@ def parse_frame_header(data, offset=0):
         side_info_size = _SIDE_INFO_SIZE[(version, is_mono)]
 
     return FrameHeader(
-        raw=bytes(data[offset : offset + 4]),
+        raw=bytes(data[offset:offset + 4]),
         version=version,
         layer=layer,
         bitrate=bitrate,
@@ -875,8 +910,11 @@ def strip_tags(data):
     end = len(data)
 
     # ID3v2: "ID3", version (2 bytes), flags (1 byte), syncsafe size (4 bytes).
-    while end - start >= 10 and data[start : start + 3] == b"ID3":
-        size_bytes = data[start + 6 : start + 10]
+    while (
+        end - start >= 10
+        and data[start:start + 3] == b"ID3"
+    ):
+        size_bytes = data[start + 6:start + 10]
 
         # Syncsafe integer: 7 significant bits per byte.
         size = 0
@@ -897,7 +935,7 @@ def strip_tags(data):
             return end, end
 
     # ID3v1: fixed 128-byte trailer beginning with "TAG".
-    if end - start >= 128 and data[end - 128 : end - 125] == b"TAG":
+    if end - start >= 128 and data[end - 128:end - 125] == b"TAG":
         end -= 128
 
     return start, end
@@ -1004,12 +1042,12 @@ def find_xing_offset(data, offset, header):
 
     vbri_at = offset + 4 + 32
 
-    if vbri_at + 4 <= frame_end and data[vbri_at : vbri_at + 4] == b"VBRI":
+    if vbri_at + 4 <= frame_end and data[vbri_at:vbri_at + 4] == b"VBRI":
         return vbri_at
 
     tag_at = offset + 4 + (2 if header.protected else 0) + header.side_info_size
 
-    if tag_at + 4 <= frame_end and data[tag_at : tag_at + 4] in (b"Xing", b"Info"):
+    if tag_at + 4 <= frame_end and data[tag_at:tag_at + 4] in (b"Xing", b"Info"):
         return tag_at
 
     return None
@@ -1054,18 +1092,18 @@ def build_info_frame(header, frame_count, total_bytes, frame_offsets=None):
     cursor = 4 + (2 if header.protected else 0) + header.side_info_size
 
     # "Info" rather than "Xing" signals a constant-bitrate stream.
-    frame[cursor : cursor + 4] = b"Info"
+    frame[cursor:cursor + 4] = b"Info"
     cursor += 4
 
     flags = XING_FRAMES_FLAG | XING_BYTES_FLAG | XING_TOC_FLAG
 
-    frame[cursor : cursor + 4] = flags.to_bytes(4, "big")
+    frame[cursor:cursor + 4] = flags.to_bytes(4, "big")
     cursor += 4
 
-    frame[cursor : cursor + 4] = frame_count.to_bytes(4, "big")
+    frame[cursor:cursor + 4] = frame_count.to_bytes(4, "big")
     cursor += 4
 
-    frame[cursor : cursor + 4] = total_bytes.to_bytes(4, "big")
+    frame[cursor:cursor + 4] = total_bytes.to_bytes(4, "big")
     cursor += 4
 
     if cursor + XING_TOC_ENTRIES > header.frame_length:
@@ -1106,7 +1144,9 @@ def build_silence_frame(header):
     audio without FFmpeg's `anullsrc`.
     """
     if header.layer != 3:
-        raise Mp3FormatError("Silence synthesis is only implemented for Layer III.")
+        raise Mp3FormatError(
+            "Silence synthesis is only implemented for Layer III."
+        )
 
     frame = bytearray(header.frame_length)
 
@@ -1163,7 +1203,6 @@ def reference_frame_header(sample_rate=None, bitrate=None, mono=True):
 # VALIDATION
 # ============================================================
 
-
 def is_valid_audio(filename, verbose=True):
     """
     Check whether an audio file is actually decodable.
@@ -1197,12 +1236,7 @@ def is_valid_audio(filename, verbose=True):
             "-",
         ]
 
-        result = subprocess.run(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
+        result = audio_tools.run(command)
 
         if result.returncode != 0:
             if verbose:
@@ -1261,7 +1295,9 @@ def is_valid_mp3_native(filename, verbose=True, min_frames=2):
     if verbose:
         print()
         print(f"INVALID MP3: {filename}")
-        print(f"Found {seen} usable MPEG frame(s); need at least {min_frames}.")
+        print(
+            f"Found {seen} usable MPEG frame(s); need at least {min_frames}."
+        )
         print()
 
     return False
@@ -1289,12 +1325,7 @@ def get_audio_duration(filename):
             str(filename),
         ]
 
-        result = subprocess.run(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
+        result = audio_tools.run(command)
 
         if result.returncode == 0:
             try:
@@ -1425,7 +1456,9 @@ def load_csv(csv_file=None, row_limit=None):
     csv_file = Path(csv_file) if csv_file else CSV_FILE
 
     if not csv_file.exists():
-        raise FileNotFoundError(f"CSV file not found: {csv_file}")
+        raise FileNotFoundError(
+            f"CSV file not found: {csv_file}"
+        )
 
     records = []
 
@@ -1439,7 +1472,9 @@ def load_csv(csv_file=None, row_limit=None):
         reader = csv.DictReader(f)
 
         if not reader.fieldnames:
-            raise RuntimeError(f"{csv_file.name} has no header row.")
+            raise RuntimeError(
+                f"{csv_file.name} has no header row."
+            )
 
         fieldnames = set(reader.fieldnames)
 
@@ -1447,7 +1482,8 @@ def load_csv(csv_file=None, row_limit=None):
 
         if missing:
             raise RuntimeError(
-                f"{csv_file.name} is missing columns: " + ", ".join(sorted(missing))
+                f"{csv_file.name} is missing columns: "
+                + ", ".join(sorted(missing))
             )
 
         speaker_column = next(
@@ -1464,32 +1500,50 @@ def load_csv(csv_file=None, row_limit=None):
 
         for row_number, row in enumerate(reader, start=2):
 
-            sequence_number = str(row.get("sequence_number") or "").strip()
+            sequence_number = str(
+                row.get("sequence_number") or ""
+            ).strip()
 
-            character_name = str(row.get("character_name") or "").strip()
+            character_name = str(
+                row.get("character_name") or ""
+            ).strip()
 
-            dialogue_text = str(row.get("dialogue_text") or "").strip()
+            dialogue_text = str(
+                row.get("dialogue_text") or ""
+            ).strip()
 
             speaker = None
 
             if speaker_column:
                 speaker = str(row.get(speaker_column) or "").strip() or None
 
-            filler_before = str(row.get(FILLER_COLUMN) or "").strip() or None
+            filler_before = (
+                str(row.get(FILLER_COLUMN) or "").strip() or None
+            )
 
-            filler_after = str(row.get(FILLER_AFTER_COLUMN) or "").strip() or None
+            filler_after = (
+                str(row.get(FILLER_AFTER_COLUMN) or "").strip() or None
+            )
 
-            background_score = str(row.get(SCORE_COLUMN) or "").strip() or None
+            background_score = (
+                str(row.get(SCORE_COLUMN) or "").strip() or None
+            )
 
-            score_cues = str(row.get(SCORE_CUES_COLUMN) or "").strip() or None
+            score_cues = (
+                str(row.get(SCORE_CUES_COLUMN) or "").strip() or None
+            )
 
             if not sequence_number:
-                print(f"WARNING: Row {row_number} has no " "sequence_number. Skipping.")
+                print(
+                    f"WARNING: Row {row_number} has no "
+                    "sequence_number. Skipping."
+                )
                 continue
 
             if not dialogue_text:
                 print(
-                    f"WARNING: Row {row_number} has empty " "dialogue_text. Skipping."
+                    f"WARNING: Row {row_number} has empty "
+                    "dialogue_text. Skipping."
                 )
                 continue
 
@@ -1644,7 +1698,7 @@ def character_token(path):
     match = _SEQUENCE_PATTERN.match(stem)
 
     if match:
-        stem = stem[match.end() :]
+        stem = stem[match.end():]
 
     return normalize_character(stem)
 
@@ -1823,6 +1877,7 @@ def needs_normalizing(path, target=None):
     return True
 
 
+
 USAGE = """\
 Usage:
     python stitch_mp3.py [ROWS] [strict=0|1] [dry_run=0|1] [loudness=0|1]
@@ -1849,9 +1904,10 @@ Usage:
     Defaults for strict and loudness come from dice-skit.json; see
     python settings.py.
 
-    Four checks abort regardless of strict: dialogues_new.csv missing, a
-    file whose character name differs from its CSV row, a file with no
-    character name, and two files for one take in the same directory.
+    Three checks abort regardless of strict: dialogues_new.csv missing, a
+    file with no character name, and two files for one take in the same
+    directory. A file whose character name differs from its CSV row aborts
+    only under strict=1; strict=0 lists it and uses the file.
 
 Examples:
     python stitch_mp3.py                  all rows, strict
@@ -1954,7 +2010,10 @@ def parse_arguments(argv, strict_default=None):
             sys.exit(1)
 
         if candidate <= 0:
-            print(f"ERROR: row limit must be a positive integer, got " f"{candidate}.")
+            print(
+                f"ERROR: row limit must be a positive integer, got "
+                f"{candidate}."
+            )
             print()
             print(USAGE)
             sys.exit(1)

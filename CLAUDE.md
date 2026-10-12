@@ -1,11 +1,5 @@
 # dice-skit
 
-## Python formatting
-
-Before running Black on Python files, replace every non-breaking space
-(`U+00A0`) in those files with an ordinary space. Black does not perform this
-replacement itself. Do not change other characters as part of this step.
-
 ## Keep README.txt and Changelog.txt up to date
 
 Whenever a functionality is added, or an existing one changes, update both
@@ -30,11 +24,11 @@ need an entry.
 ### Changelog.txt
 
 - One entry per change, at the top: the newest goes first.
-- Heading line: `YYYY-MM-DD  Short title`, with the section number from
-  `docs/audio-concat-study.md` if there is one, e.g. `(sec. 11)`.
+- Heading line: `YYYY-MM-DD  Short title`, with the section number from
+  `docs/audio-concat-study.md` if there is one, e.g. `(sec. 11)`.
 - Body: at most 50 words, written for a user, not a programmer.
 - Say what changed and what it means for the user; include a measured result
-  if there is one.
+  if there is one.
 - Never rewrite older entries, except to correct a factual error.
 
 ### README.txt

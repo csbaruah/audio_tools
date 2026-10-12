@@ -31,11 +31,12 @@ the frame splicer cannot do.
 
 import hashlib
 import json
+import math
 import re
-import subprocess
 from pathlib import Path
 
 import audio_common as common
+import audio_tools
 from concat_backends import atomic_install, temp_path_for
 
 
@@ -53,19 +54,54 @@ class MixError(RuntimeError):
 
 _DURATION = re.compile(r"^(\d+(?:\.\d+)?)s$")
 
+# A looped background repeating more than this many times usually means the
+# wrong file was named (e.g. a 2-second sound under a minute-long line).
+LOOP_WARN_REPEATS = 10
+
+
+class Cues:
+    """
+    A parsed cue string.
+
+    Unpacks as (together, segments), the shape parse_cues() returned before
+    loop support, so existing callers keep working.
+    """
+
+    def __init__(self, together, segments, loop=False, open_end=False, cut=False):
+        self.together = together
+        self.segments = segments
+        self.loop = loop
+        # True when the last segment was written with no duration (t-m): the
+        # writer said "until the end", so ending early inside it is intended.
+        self.open_end = open_end
+        # True only for exactly "t-m-loop": a longer background is cut at the
+        # line's end, so the mix is always as long as the line.
+        self.cut = cut
+
+    def __iter__(self):
+        return iter((self.together, self.segments))
+
+    def __repr__(self):
+        return (
+            f"Cues(together={self.together}, segments={self.segments}, "
+            f"loop={self.loop}, open_end={self.open_end}, cut={self.cut})"
+        )
+
 
 # ============================================================
 # CUE STRINGS
 # ============================================================
 
-
 def parse_cues(text):
     """
-    Parse a cue string into (together, segments).
+    Parse a cue string into a Cues(together, segments, loop).
 
     `segments` is a list of (track, start, end) in seconds, where track is "m"
-    or "b". The last segment's end is None: it runs to the end of the mix, and
-    its written duration is accepted but not enforced.
+    or "b". The last segment's end is None: it runs to the end of the mix. Its
+    duration may be written but is not enforced, and may be left off (t-m).
+
+    `loop` is True when the string ends in "-loop": the background then
+    repeats from its own start until the dialogue ends.
 
     Raises CueError naming the problem.
     """
@@ -74,7 +110,20 @@ def parse_cues(text):
     if not tokens or tokens == [""]:
         raise CueError("cue string is empty")
 
-    together = tokens[0] == "t"
+    # Exactly "t-m-loop" (any case) also cuts a background that is longer than
+    # the line, so that mix always lasts exactly as long as the line. Other
+    # -loop strings let a longer background play on (decided 2026-10-07).
+    cut = tokens == ["t", "m", "loop"]
+
+    loop = tokens[-1] == "loop"
+
+    if loop:
+        tokens = tokens[:-1]
+
+    if "loop" in tokens:
+        raise CueError(f'"loop" may only appear last, in "{text}"')
+
+    together = bool(tokens) and tokens[0] == "t"
 
     if together:
         tokens = tokens[1:]
@@ -83,24 +132,43 @@ def parse_cues(text):
         raise CueError(f'"t" may only appear first, in "{text}"')
 
     if not tokens:
-        raise CueError(f'"{text}" has no segments after "t"')
+        raise CueError(f'"{text}" has no segments')
 
+    # The final duration is optional: an odd count means it was left off.
     if len(tokens) % 2:
-        raise CueError(f'"{text}" must alternate letter and duration, e.g. m-2s-b-10s')
+        tokens.append(None)
 
     segments = []
     start = 0.0
     previous = None
+    last = len(tokens) - 2
+    open_end = False
 
     for index in range(0, len(tokens), 2):
         track = tokens[index]
         length = tokens[index + 1]
 
         if track not in ("m", "b"):
-            raise CueError(f'"{track}" in "{text}" is not a track; use m or b')
+            raise CueError(
+                f'"{track}" in "{text}" is not a track; use m or b'
+            )
 
         if track == previous:
-            raise CueError(f'"{text}" repeats "{track}"; letters must alternate')
+            raise CueError(
+                f'"{text}" repeats "{track}"; letters must alternate'
+            )
+
+        if length is None:
+            if index != last:
+                raise CueError(
+                    f'"{text}" must alternate letter and duration, e.g. m-2s-b-10s'
+                )
+
+            # Only the last segment may omit its duration; it runs to the end.
+            segments.append((track, start, None))
+            previous = track
+            open_end = True
+            break
 
         match = _DURATION.match(length)
 
@@ -118,10 +186,19 @@ def parse_cues(text):
         start += seconds
         previous = track
 
+    if not together and len(segments) == 1:
+        # A staggered start needs a second segment: the first is solo, and
+        # the other track enters only when it ends.
+        if segments[0][2] is None:
+            raise CueError(
+                f'"{text}" has a single open-ended segment; add "t-" to start '
+                "both tracks together, or a second segment"
+            )
+
     last_track, last_start, _ = segments[-1]
     segments[-1] = (last_track, last_start, None)
 
-    return together, segments
+    return Cues(together, segments, loop, open_end, cut)
 
 
 def score_request(record):
@@ -156,17 +233,33 @@ def score_request(record):
 # SCHEDULE
 # ============================================================
 
-
-def build_schedule(together, segments, main_length, background_length):
+def build_schedule(together, segments, main_length, background_length, loop=False,
+                   open_end=False, cut=False):
     """
     Work out when each track plays and how loud, from the cue segments and the
     two track lengths.
+
+    With `loop`, a background shorter than the dialogue repeats from its own
+    start until the dialogue ends, so the mix ends with the dialogue. A
+    background already long enough is not looped and plays to its own end, as
+    without `loop`, unless `cut` is set.
+
+    `cut` (exactly "t-m-loop") also cuts a background longer than the dialogue
+    at the dialogue's end, so the mix is always exactly as long as the line.
+
+    `open_end` means the last segment was written with no duration ("until
+    the end"), so a track running out inside it is intended and not reported.
+    The behaviour itself is unchanged: the other track still comes back up.
 
     Returns a dict:
 
         main_start, background_start   offsets in the mix, seconds
         main_end, background_end       where each track runs out
         total                          length of the mix
+        loops                          how many times the background plays;
+                                       1 when it is not looped
+        cut_at                         where a longer background is cut, in
+                                       mix time; None when it is not cut
         main_levels, background_levels lists of (time, gain), time-ordered,
                                        the first at 0
         warnings                       plain-text messages for the run log
@@ -182,9 +275,34 @@ def build_schedule(together, segments, main_length, background_length):
 
     main_end = main_start + main_length
     background_end = background_start + background_length
+    loops = 1
+
+    if loop and background_end < main_end:
+        background_end = main_end
+        loops = math.ceil((main_end - background_start) / background_length)
+
+        if loops > LOOP_WARN_REPEATS:
+            warnings.append(
+                f"the {background_length:.2f}s background repeats {loops} "
+                f"times to cover the {main_length:.2f}s dialogue; check the "
+                "right file is named"
+            )
+
+    # Only "t-m-loop" cuts a longer background, so its mix is exactly as long
+    # as the line (decided 2026-10-07).
+    cut_at = None
+
+    if cut and background_end > main_end:
+        cut_at = main_end
+        background_end = main_end
+
     total = max(main_end, background_end)
 
     ends = {"m": main_end, "b": background_end}
+
+    # Ending early inside the last segment is intended when that segment was
+    # written open-ended, or when the background was asked to loop.
+    quiet_last = open_end or loop
 
     if not together:
         solo_end = segments[0][2]
@@ -231,11 +349,14 @@ def build_schedule(together, segments, main_length, background_length):
         segment_end = total if end is None else min(end, total)
 
         if lead_end < segment_end:
-            warnings.append(
-                f"{_name(track)} ends at {lead_end:.2f}s, inside its "
-                f"prominent segment from {start:g}s; the "
-                f"{_name(_other(track))} ramps back to full volume"
-            )
+            # The behaviour never changes: the other track comes back up.
+            # Only the report differs, when the writer asked for this.
+            if not (end is None and quiet_last):
+                warnings.append(
+                    f"{_name(track)} ends at {lead_end:.2f}s, inside its "
+                    f"prominent segment from {start:g}s; the "
+                    f"{_name(_other(track))} ramps back to full volume"
+                )
 
             if track == "m":
                 background_levels.append((lead_end, 1.0))
@@ -266,6 +387,8 @@ def build_schedule(together, segments, main_length, background_length):
         "main_end": main_end,
         "background_end": background_end,
         "total": total,
+        "loops": loops,
+        "cut_at": cut_at,
         "main_levels": main_levels,
         "background_levels": background_levels,
         "warnings": warnings,
@@ -310,14 +433,8 @@ def gain_expression(levels):
 # MEASUREMENT
 # ============================================================
 
-
 def _run(command):
-    return subprocess.run(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+    return audio_tools.run(command)
 
 
 def probe_duration(path):
@@ -386,7 +503,6 @@ def integrated_loudness(path):
 # MIXING
 # ============================================================
 
-
 def mixed_path_for(main_path, background_path, cues):
     """
     Cache path for one mix.
@@ -437,26 +553,28 @@ def _is_fresh(mixed, sources):
     return common.is_valid_audio(mixed, verbose=False)
 
 
-def mix(main_path, background_path, cues):
+def mix(main_path, background_path, cue_text):
     """
     Produce the mixed file for one row, reusing the cache when it is fresh.
 
-    Returns a dict with: path, action ("cached" or "mixed"), together, total,
-    match_db, warnings, segments.
+    Returns a dict with: path, action ("cached" or "mixed"), together, loop,
+    loops, total, match_db, warnings, segments.
 
     Raises CueError for a bad cue string and MixError for anything else that
     stops the mix.
     """
-    together, segments = parse_cues(cues)
+    cues = parse_cues(cue_text)
+    together, segments = cues
 
     if not common.have_ffmpeg():
         raise MixError(
-            "mixing a background score needs FFmpeg, which was not found on " "PATH"
+            "mixing a background score needs FFmpeg, which was not found on "
+            "PATH"
         )
 
     main_path = Path(main_path)
     background_path = Path(background_path)
-    target = mixed_path_for(main_path, background_path, cues)
+    target = mixed_path_for(main_path, background_path, cue_text)
 
     if _is_fresh(target, (main_path, background_path)):
         try:
@@ -472,7 +590,15 @@ def mix(main_path, background_path, cues):
     main_length = probe_duration(main_path)
     background_length = probe_duration(background_path)
 
-    schedule = build_schedule(together, segments, main_length, background_length)
+    schedule = build_schedule(
+        together,
+        segments,
+        main_length,
+        background_length,
+        loop=cues.loop,
+        open_end=cues.open_end,
+        cut=cues.cut,
+    )
 
     match_db = 0.0
 
@@ -488,10 +614,14 @@ def mix(main_path, background_path, cues):
                 "matched to the dialogue"
             )
 
-    _render(main_path, background_path, schedule, match_db, target)
+    _render(main_path, background_path, schedule, match_db, target,
+            loop_length=background_length if schedule["loops"] > 1 else None)
 
     meta = {
         "together": together,
+        "loop": cues.loop,
+        "loops": schedule["loops"],
+        "cut_at": schedule["cut_at"],
         "total": round(probe_duration(target), 3),
         "match_db": round(match_db, 2),
         "warnings": schedule["warnings"],
@@ -506,13 +636,19 @@ def mix(main_path, background_path, cues):
     return meta
 
 
-def _render(main_path, background_path, schedule, match_db, target):
+def _render(main_path, background_path, schedule, match_db, target,
+            loop_length=None):
     """
     Run the FFmpeg mix and install the result at `target`.
+
+    `loop_length` is the background's own length when it must repeat. The
+    repeats are made by FFmpeg (-stream_loop) and the background is cut at
+    the dialogue's end. Each seam gets a short fade out and back in, of
+    SCORE_RAMP_SECONDS, so music that does not loop cleanly does not click.
     """
     rate = common.TARGET_SAMPLE_RATE
 
-    def chain(index, start, levels, pre_gain_db):
+    def chain(index, start, levels, pre_gain_db, seams=None, length=None, fade=None):
         steps = [
             f"aresample={rate}",
             "aformat=sample_fmts=flt:channel_layouts=mono",
@@ -520,6 +656,16 @@ def _render(main_path, background_path, schedule, match_db, target):
 
         if abs(pre_gain_db) > 0.005:
             steps.append(f"volume={pre_gain_db:.2f}dB")
+
+        if seams:
+            steps.append(f"volume='{_seam_expression(seams)}':eval=frame")
+
+        if length is not None:
+            steps.append(f"atrim=duration={length:.3f}")
+            steps.append("asetpts=PTS-STARTPTS")
+
+        if fade:
+            steps.append(fade)
 
         delay_ms = int(round(start * 1000))
 
@@ -530,6 +676,25 @@ def _render(main_path, background_path, schedule, match_db, target):
 
         return f"[{index}:a]" + ",".join(steps)
 
+    background_inputs = ["-i", str(background_path)]
+    seams = None
+    length = None
+
+    if loop_length:
+        background_inputs = ["-stream_loop", "-1", *background_inputs]
+        length = schedule["background_end"] - schedule["background_start"]
+        seams = [loop_length * n for n in range(1, schedule["loops"])]
+
+    if schedule.get("cut_at") is not None:
+        # A longer background cut at the line's end. It fades out over the
+        # ramp length up to the cut, so it doesn't stop abruptly.
+        length = schedule["cut_at"] - schedule["background_start"]
+        ramp = common.SCORE_RAMP_SECONDS
+        seams = None
+        fade_out = f"afade=t=out:st={max(0.0, length - ramp):.3f}:d={min(ramp, length):.3f}"
+    else:
+        fade_out = None
+
     graph = (
         chain(0, schedule["main_start"], schedule["main_levels"], 0.0)
         + "[m];"
@@ -538,6 +703,9 @@ def _render(main_path, background_path, schedule, match_db, target):
             schedule["background_start"],
             schedule["background_levels"],
             match_db,
+            seams=seams,
+            length=length,
+            fade=fade_out,
         )
         + "[b];"
         # level=disabled: the limiter's auto-level otherwise re-raises the
@@ -559,8 +727,7 @@ def _render(main_path, background_path, schedule, match_db, target):
             "-y",
             "-i",
             str(main_path),
-            "-i",
-            str(background_path),
+            *background_inputs,
             "-filter_complex",
             graph,
             "-map",
@@ -592,9 +759,34 @@ def _render(main_path, background_path, schedule, match_db, target):
     atomic_install(temp_file, target)
 
 
-def describe_cues(together, segments):
+def _seam_expression(seams):
+    """
+    A volume expression in `t` that dips to silence and back at each loop
+    seam: a linear fade out over SCORE_RAMP_SECONDS before the seam and a fade
+    in over the same time after it. 1.0 everywhere else.
+
+    Written as one minimum over the seams, so a long loop does not nest
+    hundreds of conditions.
+    """
+    ramp = common.SCORE_RAMP_SECONDS
+
+    # Distance to the nearest seam, scaled so it reaches 1 at `ramp` away.
+    terms = [f"min(1,abs(t-{s:.3f})/{ramp})" for s in seams]
+
+    expression = terms[0]
+
+    for term in terms[1:]:
+        expression = f"min({expression},{term})"
+
+    return expression
+
+
+def describe_cues(together, segments, loop=False):
     """
     One-line human reading of a parsed cue string, for the report.
+
+    Describes what the string asks for. The caller adds what actually happened
+    (how many times the background played, or that it was cut).
     """
     parts = []
 

@@ -15,10 +15,11 @@ value of run.strict in dice-skit.json) aborts before writing anything if
 any expected dialogue MP3 is missing, corrupt, or in a mismatched audio format.
 `strict=0` skips those inputs and stitches the rest, reporting what it left out.
 
-Four mandatory checks abort regardless of `strict`, with no override: the CSV
-is missing, a file's character name differs from its row, a file has no
-character name, or two files claim one take in the same directory. These guard
-the immutable take-ID scheme in section 9 of docs/audio-concat-study.md.
+Three mandatory checks abort regardless of `strict`: the CSV is missing, a
+file has no character name, or two files claim one take in the same directory.
+A fourth, a file's character name differing from its row, aborts under
+strict=1 only; strict=0 lists it and uses the file. These guard the immutable
+take-ID scheme in section 9 of docs/audio-concat-study.md.
 
 `dry_run=1` runs every check, including normalization, then stops before
 stitching. `strict` is ignored. It exits non-zero if a mandatory check failed.
@@ -74,10 +75,10 @@ import settings
 import concat_backends
 from concat_backends import select_backend, temp_path_for
 
+
 # ============================================================
 # INPUT DISCOVERY
 # ============================================================
-
 
 def resolve_from_csv(row_limit=None):
     """
@@ -94,12 +95,16 @@ def resolve_from_csv(row_limit=None):
     records = common.load_csv(row_limit=row_limit)
 
     if not records:
-        raise RuntimeError(f"No usable dialogue rows in {common.CSV_FILE.name}.")
+        raise RuntimeError(
+            f"No usable dialogue rows in {common.CSV_FILE.name}."
+        )
 
     resolved = []
 
     for record in records:
-        path, alternatives, source, collisions = common.find_dialogue_file(record)
+        path, alternatives, source, collisions = common.find_dialogue_file(
+            record
+        )
 
         expected = common.dialogue_path(record).name
 
@@ -217,7 +222,9 @@ def resolve_inputs(row_limit=None):
         print(f"Order    : CSV row order ({len(resolved)} dialogue rows)")
 
     else:
-        print(f"Manifest : none ({common.CSV_FILE.name} not found)")
+        print(
+            f"Manifest : none ({common.CSV_FILE.name} not found)"
+        )
 
         resolved = resolve_from_glob(row_limit=row_limit)
 
@@ -235,7 +242,6 @@ def resolve_inputs(row_limit=None):
 # ============================================================
 # PRE-FLIGHT
 # ============================================================
-
 
 def preflight(resolved):
     """
@@ -301,7 +307,7 @@ def preflight(resolved):
         higher = ", ".join(
             d.name
             for d in common.search_directories()[
-                : common.search_directories().index(directory)
+                :common.search_directories().index(directory)
             ]
         )
 
@@ -317,8 +323,7 @@ def preflight(resolved):
     # Surface files that satisfied a row under a non-canonical name, and any
     # slot that more than one file claimed.
     renamed = [
-        entry
-        for entry in usable
+        entry for entry in usable
         if entry.get("expected") and entry["path"].name != entry["expected"]
     ]
 
@@ -351,11 +356,15 @@ def preflight(resolved):
         print()
         print(f"MISSING ({len(missing)}):")
 
-        searched = ", ".join(d.name for d in common.search_directories())
+        searched = ", ".join(
+            d.name for d in common.search_directories()
+        )
 
         for entry in missing:
             print(f"    {entry['label']}")
-            common.warn(f"no audio for {entry['label']} - searched {searched}")
+            common.warn(
+                f"no audio for {entry['label']} - searched {searched}"
+            )
 
     if corrupt:
         print()
@@ -382,7 +391,9 @@ def log_row_sources(resolved):
     common.log_only("=" * 70)
     common.log_only("ROW SOURCES")
     common.log_only("=" * 70)
-    common.log_only(f"{'seq':>5}  {'source':<12}  {'file':<34}  status")
+    common.log_only(
+        f"{'seq':>5}  {'source':<12}  {'file':<34}  status"
+    )
     common.log_only("-" * 70)
 
     counts = {}
@@ -419,28 +430,30 @@ def log_row_sources(resolved):
 # MANDATORY CHECKS
 # ============================================================
 
-
-def mandatory_checks(resolved):
+def mandatory_checks(resolved, strict=True):
     """
-    The four checks that abort a run regardless of `strict`.
-
-    Each catches a way of producing a complete, plausible-sounding master that
-    is nonetheless wrong -- the wrong actor on a line, or lines in the wrong
-    order. `strict=0` means "build what exists despite gaps", which is no
-    defence against inputs that are present but mispaired, so these bypass it.
-    There is deliberately no override. See section 9 of
-    docs/audio-concat-study.md.
+    The four checks that guard against a complete, plausible-sounding master
+    that is nonetheless wrong -- the wrong actor on a line, or lines in the
+    wrong order. See section 9 of docs/audio-concat-study.md.
 
         1. dialogues_new.csv is absent, so the order would be numeric.
         2. A file's character name differs from its CSV row's.
         3. A file carries no character name at all, so 2 cannot be checked.
         4. More than one file claims a take within the winning directory.
 
-    Every row is checked before anything is reported, so one run surfaces
-    every fault. Nothing here feeds the `problems` counter; the caller gates
-    on the returned list independently of `strict`.
+    Checks 1, 3 and 4 abort regardless of `strict`. Check 2 aborts under
+    strict=1; under strict=0 it is reported in full and counted as an
+    ordinary problem instead, and the mismatched files are used as they are
+    (decided 2026-10-07, section 9.6). Its usual causes are a spelling
+    difference ("Dhritrashtra" vs DHRITARASHTRA) or one recording covering
+    several takes ("23_24_Shakuni.m4a"), not a renumbered line.
 
-    Returns a list of (title, count), one per failing check.
+    Every row is checked before anything is reported, so one run surfaces
+    every fault.
+
+    Returns (fatal, waived): lists of (title, count). `fatal` aborts the run
+    whatever `strict` says. `waived` holds failures strict=0 lets through, for
+    the caller to add to its ordinary problem count.
     """
     print()
     print("=" * 70)
@@ -479,26 +492,34 @@ def mandatory_checks(resolved):
             collided.append(entry)
 
     fatal = []
+    waived = []
 
     if csv_missing:
         fatal.append(("manifest missing", 1))
 
         print()
         print(f"MANIFEST MISSING - {common.CSV_FILE.name} not found:")
-        print("    Without it the running order falls back to numeric order of")
-        print("    the take IDs, which is not script order once IDs are frozen.")
+        print(
+            "    Without it the running order falls back to numeric order of"
+        )
+        print(
+            "    the take IDs, which is not script order once IDs are frozen."
+        )
         common.warn(
             f"{common.CSV_FILE.name} not found; refusing to stitch in "
             "numeric take-ID order"
         )
 
     if mismatched:
-        fatal.append(("character mismatch", len(mismatched)))
+        (fatal if strict else waived).append(
+            ("character mismatch", len(mismatched))
+        )
 
         print()
         print(
             f"CHARACTER MISMATCH ({len(mismatched)}) - file's character "
-            "differs from the CSV row:"
+            "differs from the CSV row"
+            + (":" if strict else " (allowed, strict is off):")
         )
 
         for entry in mismatched:
@@ -525,7 +546,9 @@ def mandatory_checks(resolved):
 
         for entry in unnamed:
             print(f"    {entry['label']:<34} ({entry['source'].name})")
-            common.warn(f"no character name in filename: {entry['path']}")
+            common.warn(
+                f"no character name in filename: {entry['path']}"
+            )
 
     if collided:
         fatal.append(("take-id collision", len(collided)))
@@ -550,19 +573,29 @@ def mandatory_checks(resolved):
                 + ", ".join(p.name for p in names)
             )
 
-    if fatal:
+    if fatal or waived:
         print()
+
+    if fatal:
         print(
             f"FAILED   : {sum(count for _, count in fatal)} exception(s) in "
             f"{len(fatal)} mandatory check(s) - these abort regardless of "
             "strict."
         )
-    else:
+
+    if waived:
         print(
-            "Passed   : manifest present, character names agree, one file " "per take"
+            f"ALLOWED  : {sum(count for _, count in waived)} character "
+            "mismatch(es), because strict is off. The files above are used "
+            "as they are; check they are the right takes."
         )
 
-    return fatal
+    if not fatal and not waived:
+        print("Passed   : manifest present, character names agree, one file "
+              "per take")
+
+    return fatal, waived
+
 
 
 def first_audio_header(path):
@@ -612,9 +645,7 @@ def survey_formats(paths):
         groups.setdefault(
             common.format_key(header),
             {"header": header, "paths": []},
-        )[
-            "paths"
-        ].append(Path(path))
+        )["paths"].append(Path(path))
 
     return groups
 
@@ -663,16 +694,30 @@ def report_format_survey(groups):
             print(f"        ... and {remaining} more")
 
     print()
-    print("    Sample rate and channel mode are stored per MPEG frame, so a")
-    print("    stream-copy concatenation of mixed formats produces a file that")
-    print("    many players mis-time and whose reported duration is wrong.")
+    print(
+        "    Sample rate and channel mode are stored per MPEG frame, so a"
+    )
+    print(
+        "    stream-copy concatenation of mixed formats produces a file that"
+    )
+    print(
+        "    many players mis-time and whose reported duration is wrong."
+    )
     print()
     print("    Fix one of these ways:")
-    print("      - re-encode the outliers to the majority format, e.g.")
-    print("        ffmpeg -i outlier.mp3 -ar 24000 -ac 1 -b:a 128k fixed.mp3")
-    print("      - check TARGET_SAMPLE_RATE / TARGET_BITRATE in " "audio_common.py")
+    print(
+        "      - re-encode the outliers to the majority format, e.g."
+    )
+    print(
+        "        ffmpeg -i outlier.mp3 -ar 24000 -ac 1 -b:a 128k fixed.mp3"
+    )
+    print(
+        "      - check TARGET_SAMPLE_RATE / TARGET_BITRATE in "
+        "audio_common.py"
+    )
 
     return False
+
 
 
 def resolve_row_fillers(entries):
@@ -718,7 +763,9 @@ def resolve_row_fillers(entries):
             entry["filler_source"] = None
             suppressed.append(entry)
 
-        elif not path.exists() or not common.is_valid_audio(path, verbose=False):
+        elif not path.exists() or not common.is_valid_audio(
+            path, verbose=False
+        ):
             entry["filler_source"] = common.SHORT_FILLER
             entry["filler_problem"] = path
             missing.append(entry)
@@ -746,7 +793,9 @@ def resolve_row_fillers(entries):
     return named, missing, after_named, after_missing, suppressed
 
 
-def report_row_fillers(entries, named, missing, after_named, after_missing, suppressed):
+def report_row_fillers(
+    entries, named, missing, after_named, after_missing, suppressed
+):
     """
     Summarise which filler precedes and which follows each row.
     """
@@ -757,18 +806,26 @@ def report_row_fillers(entries, named, missing, after_named, after_missing, supp
 
     default_count = len(entries) - len(named) - len(suppressed)
 
-    print(f"Default ({common.SHORT_FILLER.name}) : {default_count} row(s)")
+    print(
+        f'Default ({common.SHORT_FILLER.name}) : {default_count} row(s)'
+    )
     print(f"Named in {common.FILLER_COLUMN:<19}: {len(named)} row(s)")
     print(f"Suppressed with \"N\"{'':<9}: {len(suppressed)} row(s)")
-    print(f"Named in {common.FILLER_AFTER_COLUMN:<19}: {len(after_named)} row(s)")
-    print(f"No trailing filler{'':<10}: " f"{len(entries) - len(after_named)} row(s)")
+    print(
+        f"Named in {common.FILLER_AFTER_COLUMN:<19}: {len(after_named)} row(s)"
+    )
+    print(
+        f"No trailing filler{'':<10}: "
+        f"{len(entries) - len(after_named)} row(s)"
+    )
 
     if named:
         print()
 
         for entry in named:
             print(
-                f"    before {entry['label']:<34} " f"<- {entry['filler_source'].name}"
+                f"    before {entry['label']:<34} "
+                f"<- {entry['filler_source'].name}"
             )
 
     if suppressed:
@@ -794,7 +851,10 @@ def report_row_fillers(entries, named, missing, after_named, after_missing, supp
         )
 
         for entry in missing:
-            print(f"    {entry['label']:<34} wanted " f"{entry['filler_problem'].name}")
+            print(
+                f"    {entry['label']:<34} wanted "
+                f"{entry['filler_problem'].name}"
+            )
             common.warn(
                 f"filler_before \"{entry['filler_problem'].name}\" not found "
                 f"for {entry['label']}; used {common.SHORT_FILLER.name}"
@@ -821,7 +881,6 @@ def report_row_fillers(entries, named, missing, after_named, after_missing, supp
 # ============================================================
 # DIALOGUE LOUDNESS
 # ============================================================
-
 
 def apply_loudness(entries):
     """
@@ -949,7 +1008,9 @@ def apply_loudness(entries):
 
     if failed:
         print()
-        print(f"LOUDNESS NOT APPLIED ({len(failed)}) - stitched at the original level:")
+        print(
+            f"LOUDNESS NOT APPLIED ({len(failed)}) - stitched at the original level:"
+        )
 
         for entry in failed:
             print(f"    {entry['label']}")
@@ -965,7 +1026,6 @@ def apply_loudness(entries):
 # ============================================================
 # BACKGROUND SCORE
 # ============================================================
-
 
 def apply_background_scores(entries):
     """
@@ -1064,7 +1124,20 @@ def apply_background_scores(entries):
             )
             print(
                 "        "
-                + background_score.describe_cues(score["together"], score["segments"])
+                + background_score.describe_cues(
+                    score["together"], score["segments"], score.get("loop", False)
+                )
+                + (
+                    f"; background repeated {score['loops']} times to the end "
+                    "of the line"
+                    if score.get("loops", 1) > 1
+                    else ""
+                )
+                + (
+                    "; background cut at the end of the line"
+                    if score.get("cut_at") is not None
+                    else ""
+                )
             )
 
     if warned:
@@ -1099,7 +1172,6 @@ def apply_background_scores(entries):
 # ============================================================
 # NORMALIZATION
 # ============================================================
-
 
 def normalize_entries(entries, target):
     """
@@ -1152,14 +1224,20 @@ def normalize_entries(entries, target):
             # loudness-matched row its leveled copy, instead of the bare
             # dialogue. Both are already in target format.
             entry["stitch_path"] = resolve(
-                entry.get("mixed_path") or entry.get("leveled_path") or entry["path"]
+                entry.get("mixed_path")
+                or entry.get("leveled_path")
+                or entry["path"]
             )
 
             filler_source = entry.get("filler_source")
-            entry["filler_path"] = resolve(filler_source) if filler_source else None
+            entry["filler_path"] = (
+                resolve(filler_source) if filler_source else None
+            )
 
             after_source = entry.get("filler_after_source")
-            entry["filler_after_path"] = resolve(after_source) if after_source else None
+            entry["filler_after_path"] = (
+                resolve(after_source) if after_source else None
+            )
 
         except concat_backends.NormalizationError as exc:
             entry["problem"] = str(exc)
@@ -1200,7 +1278,6 @@ def normalize_entries(entries, target):
 # FILLERS
 # ============================================================
 
-
 def ensure_filler(backend, target_path, seconds, reference):
     """
     Create or repair a filler file.
@@ -1212,7 +1289,9 @@ def ensure_filler(backend, target_path, seconds, reference):
     if target_path.exists():
         existing = first_audio_header(target_path)
 
-        if existing is None or not common.is_valid_audio(target_path, verbose=False):
+        if existing is None or not common.is_valid_audio(
+            target_path, verbose=False
+        ):
             print(f"Removing invalid filler: {target_path.name}")
             target_path.unlink()
 
@@ -1241,7 +1320,6 @@ def ensure_filler(backend, target_path, seconds, reference):
 # ============================================================
 # SEQUENCE ASSEMBLY
 # ============================================================
-
 
 def build_sequence(entries):
     """
@@ -1276,7 +1354,6 @@ def build_sequence(entries):
 # ============================================================
 # STITCHING
 # ============================================================
-
 
 def stitch_single_pass(backend, sequence, target):
     """
@@ -1358,7 +1435,6 @@ def stitch_batched(backend, sequence, target, batch_size):
 # DRY RUN
 # ============================================================
 
-
 def report_dry_run(fatal, problems):
     """
     Close a dry run: summarise what the checks found and return the exit code.
@@ -1410,9 +1486,92 @@ def report_dry_run(fatal, problems):
 
 
 # ============================================================
-# MAIN
+# CLEAN
 # ============================================================
 
+def clean_command(argv):
+    """
+    "stitch_mp3.py clean": empty the master and work folders inside output,
+    after asking. The log folder is never touched, and neither are input or
+    in-out. "clean yes=1" skips the question (doc section 14).
+
+    Returns the exit code.
+    """
+    import layout
+
+    extra = [a for a in argv[2:] if a.strip()]
+    assume_yes = False
+
+    for argument in extra:
+        key, _, value = argument.lstrip("-/").partition("=")
+
+        if key.lower() == "yes" and value.strip().lower() in ("1", "true", "yes", "on"):
+            assume_yes = True
+        else:
+            print(f'ERROR: "clean" takes only yes=1, not "{argument}".')
+            print("It never runs a build; run a build separately.")
+            return 1
+
+    try:
+        targets = layout.clean_targets(
+            common.OUTPUT_DIRECTORY,
+            common.OUT_DIRECTORY,
+            common.WORK_DIRECTORY,
+            common.LOG_DIRECTORY,
+        )
+    except layout.LayoutError as exc:
+        print(f"ERROR: {exc}")
+        return 1
+
+    summary = layout.summarise(targets)
+    total_files = sum(n for _, n, _ in summary)
+
+    print()
+    print("=" * 70)
+    print("CLEAN")
+    print("=" * 70)
+
+    for folder, files, size in summary:
+        print(f"    {folder}")
+        print(f"        {files} file(s), {size / (1024 * 1024):.1f} MB")
+
+    print(f"Kept        : {common.LOG_DIRECTORY} (logs), and all inputs")
+
+    if total_files == 0:
+        print()
+        print("Nothing to delete.")
+        return 0
+
+    if not assume_yes:
+        try:
+            print()
+            answer = input(f"Delete these {total_files} file(s)? [y/N] ")
+        except EOFError:
+            answer = ""
+
+        if answer.strip().lower() not in ("y", "yes"):
+            print("Nothing was deleted.")
+            return 0
+
+    log_file = common.start_run_log("clean")
+    common.log_only("CLEAN")
+
+    for folder, files, size in summary:
+        common.log_only(f"  {folder}: {files} file(s), {size} bytes")
+
+    removed = layout.clean(targets)
+
+    print()
+    print(f"Deleted {removed} file(s). The next build recreates what it needs.")
+    common.close_run_log()
+    print(f"Run log written: {log_file}")
+
+    return 0
+
+
+# ============================================================
+# MAIN
+# ============================================================
 
 def main():
 
@@ -1436,7 +1595,8 @@ def main():
         )
     else:
         print(
-            f"Strict mode : {'on' if strict else 'OFF'} " f"({arguments.strict_source})"
+            f"Strict mode : {'on' if strict else 'OFF'} "
+            f"({arguments.strict_source})"
         )
 
         if not strict:
@@ -1455,12 +1615,8 @@ def main():
         )
     )
     print(
-        f"Settings    : {settings.SETTINGS_FILE.name} "
-        + (
-            "found"
-            if settings.SETTINGS_FILE.exists()
-            else "not found; built-in defaults"
-        )
+        f"Settings    : {common.SETTINGS_FILE.name} "
+        + ("found" if common.SETTINGS_FILE.exists() else "not found; built-in defaults")
     )
 
     # Every setting and where it came from, so a master can be traced back to
@@ -1475,9 +1631,9 @@ def main():
         f"  {'command line':<34} strict={int(strict)} dry_run={int(dry_run)} "
         f"loudness={int(arguments.loudness)}"
     )
-    print(
-        f"Sources     : " + " then ".join(str(d) for d in common.search_directories())
-    )
+    print(f"Sources     : " + " then ".join(
+        str(d) for d in common.search_directories()
+    ))
 
     common.OUT_DIRECTORY.mkdir(parents=True, exist_ok=True)
     common.WORK_DIRECTORY.mkdir(parents=True, exist_ok=True)
@@ -1497,7 +1653,10 @@ def main():
             f"{common.OUT_DIRECTORY}"
         )
         print()
-        print("Generation is disabled; see generate_mp3.py for how to " "re-enable it.")
+        print(
+            "Generation is disabled; see generate_mp3.py for how to "
+            "re-enable it."
+        )
 
         return 1
 
@@ -1506,8 +1665,12 @@ def main():
     problems = len(missing) + len(corrupt)
 
     # Collected now, acted on only after every other check has reported, so a
-    # single run shows the whole picture.
-    fatal = mandatory_checks(resolved)
+    # single run shows the whole picture. A dry run ignores strict and so
+    # treats a character mismatch as allowed: it is still listed in full, but
+    # it must not fail a check that a strict=0 build would pass.
+    fatal, waived = mandatory_checks(resolved, strict=strict and not dry_run)
+
+    problems += sum(count for _, count in waived)
 
     target = common.canonical_target_header()
 
@@ -1656,8 +1819,7 @@ def main():
     # row and would otherwise dominate the survey counts.
     seen = set()
     surveyed = [
-        path
-        for path in surveyed
+        path for path in surveyed
         if not (path.resolve() in seen or seen.add(path.resolve()))
     ]
 
@@ -1691,7 +1853,9 @@ def main():
         )
 
         if problems:
-            print(f"A further {problems} ordinary problem(s) were also reported.")
+            print(
+                f"A further {problems} ordinary problem(s) were also reported."
+            )
 
         print()
 
@@ -1753,15 +1917,19 @@ def main():
                 entry["filler_after_path"] = None
 
         usable = [
-            entry
-            for entry in usable
+            entry for entry in usable
             if entry["stitch_path"].resolve() in keep
-            and (entry["filler_path"] is None or entry["filler_path"].resolve() in keep)
+            and (
+                entry["filler_path"] is None
+                or entry["filler_path"].resolve() in keep
+            )
         ]
 
         if not usable:
             print()
-            print("ERROR: no dialogue files remain in the majority format.")
+            print(
+                "ERROR: no dialogue files remain in the majority format."
+            )
 
             return 1
 
@@ -1870,7 +2038,10 @@ def main():
 
     if problems:
         print()
-        print(f"WARNING: master is INCOMPLETE - {problems} input(s) were " "skipped.")
+        print(
+            f"WARNING: master is INCOMPLETE - {problems} input(s) were "
+            "skipped."
+        )
 
     print()
 
@@ -1882,6 +2053,9 @@ def main():
 # ============================================================
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1].strip().lower() == "clean":
+        sys.exit(clean_command(sys.argv))
+
     try:
         try:
             code = main()
