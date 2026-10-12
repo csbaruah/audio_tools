@@ -21,10 +21,10 @@ and teach select_backend() about it; nothing else needs to change.
 """
 
 import shutil
-import subprocess
 from pathlib import Path
 
 import audio_common as common
+import audio_tools
 from audio_common import (
     Mp3FormatError,
     build_info_frame,
@@ -39,10 +39,10 @@ from audio_common import (
     strip_tags,
 )
 
+
 # ============================================================
 # SHARED HELPERS
 # ============================================================
-
 
 def temp_path_for(target, tag):
     """
@@ -111,7 +111,9 @@ def write_concat_list(files, list_file):
                 "'\\''",
             )
 
-            f.write(f"file '{path_string}'\n")
+            f.write(
+                f"file '{path_string}'\n"
+            )
 
 
 # ============================================================
@@ -141,9 +143,7 @@ def normalized_path_for(source, cache_directory=None):
     Keyed on the source stem, so re-running is cheap. Staleness is detected by
     modification time rather than by hashing the content.
     """
-    cache_directory = (
-        Path(cache_directory) if cache_directory else common.NORMALIZED_DIRECTORY
-    )
+    cache_directory = Path(cache_directory) if cache_directory else common.NORMALIZED_DIRECTORY
 
     return cache_directory / f"{Path(source).stem}.mp3"
 
@@ -205,12 +205,7 @@ def transcode_to_target(source, target_path, header):
         str(temp_file),
     ]
 
-    result = subprocess.run(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+    result = audio_tools.run(command)
 
     if result.returncode != 0:
         if temp_file.exists():
@@ -277,7 +272,6 @@ def normalize_input(source, header=None, cache_directory=None, verbose=True):
 # BACKEND INTERFACE
 # ============================================================
 
-
 class ConcatBackend:
     """
     Interface every concatenation backend implements.
@@ -316,7 +310,6 @@ class ConcatBackend:
 # ============================================================
 # FFMPEG BACKEND
 # ============================================================
-
 
 class FfmpegBackend(ConcatBackend):
     """
@@ -412,12 +405,7 @@ class FfmpegBackend(ConcatBackend):
             str(temp_file),
         ]
 
-        result = subprocess.run(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
+        result = audio_tools.run(command)
 
         if result.returncode != 0:
             print()
@@ -453,7 +441,10 @@ class FfmpegBackend(ConcatBackend):
         """
         target = Path(target)
 
-        print("Writing MP3 Xing/Info seek metadata " "without re-encoding audio...")
+        print(
+            "Writing MP3 Xing/Info seek metadata "
+            "without re-encoding audio..."
+        )
 
         temp_file = temp_path_for(target, "seekable")
 
@@ -477,12 +468,7 @@ class FfmpegBackend(ConcatBackend):
             str(temp_file),
         ]
 
-        result = subprocess.run(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
+        result = audio_tools.run(command)
 
         if result.returncode != 0:
             print()
@@ -502,7 +488,6 @@ class FfmpegBackend(ConcatBackend):
 # ============================================================
 # PURE-PYTHON MP3 BACKEND
 # ============================================================
-
 
 class RawMp3Backend(ConcatBackend):
     """
@@ -538,7 +523,9 @@ class RawMp3Backend(ConcatBackend):
         if str(output_format).lower() != "mp3":
             return False
 
-        return all(Path(path).suffix.lower() == ".mp3" for path in paths)
+        return all(
+            Path(path).suffix.lower() == ".mp3" for path in paths
+        )
 
     # --------------------------------------------------------
     # Silence
@@ -654,16 +641,20 @@ class RawMp3Backend(ConcatBackend):
 
                         frame_offsets.append(audio_bytes)
 
-                        out.write(data[offset : offset + header.frame_length])
+                        out.write(data[offset:offset + header.frame_length])
 
                         audio_bytes += header.frame_length
                         file_frames += 1
 
                     if file_frames == 0:
-                        raise Mp3FormatError(f"No usable MPEG frames found in {path}")
+                        raise Mp3FormatError(
+                            f"No usable MPEG frames found in {path}"
+                        )
 
             if reference is None:
-                raise Mp3FormatError("No usable MPEG frames found in any input.")
+                raise Mp3FormatError(
+                    "No usable MPEG frames found in any input."
+                )
 
             info_frame = build_info_frame(
                 reference,
@@ -679,7 +670,9 @@ class RawMp3Backend(ConcatBackend):
                     shutil.copyfileobj(audio, out)
 
             duration = (
-                len(frame_offsets) * reference.samples_per_frame / reference.sample_rate
+                len(frame_offsets)
+                * reference.samples_per_frame
+                / reference.sample_rate
             )
 
             print(

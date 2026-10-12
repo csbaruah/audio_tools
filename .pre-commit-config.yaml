@@ -1,0 +1,15 @@
+repos:
+  - repo: local
+    hooks:
+      - id: normalize-nbsp
+        name: Replace non-breaking spaces
+        entry: python scripts/normalize_nbsp.py
+        language: system
+        pass_filenames: false
+        types: [python]
+
+      - id: black
+        name: Black
+        entry: python -m black
+        language: system
+        types: [python]

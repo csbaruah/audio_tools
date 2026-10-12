@@ -86,23 +86,17 @@ class Setting:
                 )
 
             if self.minimum is not None and value < self.minimum:
-                raise SettingsError(
-                    f"{where} must be at least {self.minimum}, got {value}"
-                )
+                raise SettingsError(f"{where} must be at least {self.minimum}, got {value}")
 
             if self.maximum is not None and value > self.maximum:
-                raise SettingsError(
-                    f"{where} must be at most {self.maximum}, got {value}"
-                )
+                raise SettingsError(f"{where} must be at most {self.maximum}, got {value}")
 
             if self.kind == "float":
                 value = float(value)
 
         elif self.kind in ("str", "path", "url"):
             if not isinstance(value, str) or not value.strip():
-                raise SettingsError(
-                    f"{where} must be a non-empty string, got {value!r}"
-                )
+                raise SettingsError(f"{where} must be a non-empty string, got {value!r}")
 
         elif self.kind == "path_list":
             if (
@@ -141,8 +135,7 @@ SPEC = {
     "run": {
         "_comment": "How a build behaves.",
         "strict": Setting(
-            True,
-            "bool",
+            True, "bool",
             [
                 "What to do when a line's audio is missing, corrupt or unconvertible.",
                 "true: abort and leave the old master untouched. Use for the final build.",
@@ -151,8 +144,7 @@ SPEC = {
             ],
         ),
         "backend": Setting(
-            "auto",
-            "str",
+            "auto", "str",
             [
                 "How audio files are joined.",
                 "auto: FFmpeg if installed, else the built-in joiner (recommended).",
@@ -162,49 +154,39 @@ SPEC = {
             choices=("auto", "ffmpeg", "python"),
         ),
         "batch_size": Setting(
-            None,
-            "int",
+            None, "int",
             "null = one pass (recommended). A number, e.g. 40, only if one pass runs out of memory.",
-            minimum=1,
-            nullable=True,
+            minimum=1, nullable=True,
         ),
     },
     "paths": {
-        "_comment": "Where files are read from and written to.",
-        "csv": Setting(
-            "dialogues_new.csv",
-            "path",
-            "The script: lines, order, fillers, background scores.",
-        ),
-        "human_gen": Setting(
-            "human_gen", "path", "Recorded takes and named sound files."
-        ),
-        "machine_gen": Setting("machine_gen", "path", "TTS-generated takes."),
-        "work": Setting(
-            "work",
-            "path",
-            "Caches and generated silence. Safe to delete; rebuilt on the next run.",
-        ),
-        "log": Setting("log", "path", "One log file per run."),
-        "output": Setting("dialogues-mp3", "path", "Holds only the finished master."),
-        "master": Setting(
-            "master_dialogues.mp3", "str", "Master filename, inside the output folder."
-        ),
+        "_comment": [
+            "Where files are read from and written to (doc section 14).",
+            "input, in_out and output are the three top-level folders; each may be relative to the project folder or absolute, e.g. D:/dice-skit-output.",
+            "The other folders are relative to their parent: csv and human_gen to input, machine_gen to in_out, master_dir, work and log to output.",
+            "output must not be inside input or in_out, nor contain them: 'stitch_mp3.py clean' deletes inside output.",
+        ],
+        "input": Setting("input", "path", "Top-level input folder. Never written by the pipeline except by fetch_drive.py, which downloads into human_gen."),
+        "in_out": Setting("in-out", "path", "Top-level folder for material one stage writes and another reads: machine_gen."),
+        "output": Setting("output", "path", "Top-level output folder: master, work and log. Everything in it can be rebuilt."),
+        "csv": Setting("dialogues_new.csv", "path", "The script, inside input: lines, order, fillers, background scores."),
+        "human_gen": Setting("human_gen", "path", "Recorded takes and named sound files, inside input."),
+        "machine_gen": Setting("machine_gen", "path", "TTS-generated takes, inside in_out. generate_mp3.py writes here; stitch_mp3.py reads it."),
+        "master_dir": Setting("master", "path", "Folder for the finished master, inside output."),
+        "work": Setting("work", "path", "Caches and generated silence, inside output. Safe to delete; rebuilt on the next run."),
+        "log": Setting("log", "path", "One log file per run, inside output. 'clean' never deletes it."),
+        "master": Setting("master_dialogues.mp3", "str", "Master filename, inside master_dir."),
         "search_order": Setting(
-            ["human_gen", "machine_gen"],
-            "path_list",
+            ["human_gen", "machine_gen"], "path_list",
             "When both folders hold a file for the same take, the first listed wins.",
             choices=("human_gen", "machine_gen"),
         ),
     },
     "output": {
         "_comment": "Format of the master and of every piece in it.",
-        "format": Setting(
-            "mp3", "str", "Only mp3 is supported today.", choices=("mp3",)
-        ),
+        "format": Setting("mp3", "str", "Only mp3 is supported today.", choices=("mp3",)),
         "sample_rate": Setting(
-            24000,
-            "int",
+            24000, "int",
             [
                 "Hz. 24000 matches the TTS output, so those files need no conversion (recommended for speech).",
                 "44100 or 48000 suit music-heavy productions, but every TTS line must then be converted.",
@@ -213,145 +195,116 @@ SPEC = {
             choices=(16000, 22050, 24000, 32000, 44100, 48000),
         ),
         "bitrate": Setting(
-            128000,
-            "int",
+            128000, "int",
             [
                 "Bits per second. Higher means better quality and a bigger file.",
                 "At 16000-24000 Hz: 8000-160000; 128000 is clear speech.",
                 "At 32000-48000 Hz: 32000-320000; 192000 or more suits music.",
             ],
-            minimum=8000,
-            maximum=320000,
+            minimum=8000, maximum=320000,
         ),
         "mono": Setting(
-            True,
-            "bool",
+            True, "bool",
             "true: right for dialogue. false: stereo, only if stereo music width matters; about twice the size.",
         ),
     },
     "fillers": {
         "_comment": "Generated silence between lines, always in the output format above.",
         "short_seconds": Setting(
-            2.0,
-            "float",
+            2.0, "float",
             [
                 "Gap before each line whose filler_before cell is empty.",
                 "1-1.5 brisk, 2 natural (default), 3+ slow and dramatic.",
                 "Applies to almost every line: +1 s on 154 lines adds about 2.5 minutes.",
             ],
-            minimum=0.1,
-            maximum=60,
+            minimum=0.1, maximum=60,
         ),
         "long_seconds": Setting(
-            10.0,
-            "float",
+            10.0, "float",
             "Length of long_filler.mp3, for rows that name it, e.g. a scene change.",
-            minimum=0.1,
-            maximum=600,
+            minimum=0.1, maximum=600,
         ),
     },
     "background_score": {
         "_comment": "Music under a line (doc section 10). Only affects rows with background_score and score_cues filled in.",
         "duck_db": Setting(
-            -14.0,
-            "float",
+            -14.0, "float",
             "How far the faded track is turned down, below 0. -6 subtle, -14 faint but audible (default), -20 almost silent.",
-            minimum=-40,
-            maximum=-1,
+            minimum=-40, maximum=-1,
         ),
         "ramp_seconds": Setting(
-            0.3,
-            "float",
+            0.3, "float",
             "Crossfade length. 0.1 quick, 0.3 smooth (default), 1.0 slow. Keep it shorter than your shortest cue segment.",
-            minimum=0.01,
-            maximum=5,
+            minimum=0.01, maximum=5,
         ),
         "match_loudness": Setting(
-            True,
-            "bool",
+            True, "bool",
             "true: bring the music to the line's loudness before mixing (recommended). false: only if the music is pre-mastered to sit under dialogue.",
         ),
         "limit": Setting(
-            0.95,
-            "float",
+            0.95, "float",
             "Peak ceiling for the mix, 0.5-1.0 of full scale. Lower only if mixes sound distorted.",
-            minimum=0.5,
-            maximum=1.0,
+            minimum=0.5, maximum=1.0,
         ),
     },
     "loudness": {
         "_comment": "Even out volume across lines (doc section 11). Dialogue only; fillers, sound effects and music keep their levels.",
         "enabled": Setting(
-            True,
-            "bool",
+            True, "bool",
             "false leaves each line at its recorded level; useful for comparing. Same as loudness=0 on the command line.",
         ),
         "target_lufs": Setting(
-            -19.0,
-            "float",
+            -19.0, "float",
             [
                 "Closer to 0 is louder.",
                 "-16 loud: phone speakers, noisy places; more lines get limited.",
                 "-19 balanced for speech (default). -23 broadcast standard; quieter, very little limiting.",
             ],
-            minimum=-31,
-            maximum=-10,
+            minimum=-31, maximum=-10,
         ),
         "true_peak_dbfs": Setting(
-            -1.0,
-            "float",
+            -1.0, "float",
             "Highest allowed peak. -1 default; -2 if the master will be re-encoded later, e.g. by an upload platform.",
-            minimum=-9,
-            maximum=0,
+            minimum=-9, maximum=0,
         ),
     },
     "tts": {
         "_comment": "Generating lines with Sarvam (generate_mp3.py). The API key is never stored in this file.",
-        "enabled": Setting(
-            False, "bool", "true generates missing lines and uses API credit."
-        ),
+        "enabled": Setting(False, "bool", "true generates missing lines and uses API credit."),
         "api_key_source": Setting(
-            "env",
-            "str",
+            "env", "str",
             "env: SARVAM_API_KEY from .env (today). keyring: Windows Credential Manager (recommended once a GUI exists).",
             choices=("env", "keyring"),
         ),
         "language": Setting(
-            "en-IN",
-            "str",
+            "en-IN", "str",
             "Language and accent, e.g. en-IN (Indian English), hi-IN (Hindi). See Sarvam's documentation.",
         ),
         "model": Setting("bulbul:v3", "str", "Sarvam voice model."),
         "pace": Setting(
-            1.0,
-            "float",
+            1.0, "float",
             "Speaking speed. 1.0 normal; lower is slower. See Sarvam's documentation for the range.",
-            minimum=0.3,
-            maximum=3.0,
+            minimum=0.3, maximum=3.0,
         ),
         "sample_rate": Setting(
-            24000,
-            "int",
+            24000, "int",
             "Rate requested from TTS. Keep it equal to output.sample_rate so generated lines need no conversion.",
             choices=(8000, 16000, 22050, 24000, 44100, 48000),
         ),
         "overwrite_existing": Setting(
-            False,
-            "bool",
+            False, "bool",
             "true regenerates every line, e.g. after changing voice or pace. Uses API credit.",
         ),
     },
     "drive": {
         "_comment": "Downloading recordings (fetch_drive.py).",
         "folder_url": Setting(
-            None,
-            "url",
+            None, "url",
             "Shared Google Drive folder link. null means pass it on the command line.",
             nullable=True,
         ),
         "use_cookies": Setting(
-            False,
-            "bool",
+            False, "bool",
             "true only if the folder is not link-shared and needs your browser login.",
         ),
     },
@@ -369,7 +322,6 @@ FILE_COMMENT = [
 # ============================================================
 # LOADING
 # ============================================================
-
 
 def _unique_keys(pairs):
     """
@@ -403,16 +355,15 @@ def load(path=None):
         for section, fields in SPEC.items()
     }
     sources = {
-        section: {k: "default" for k in fields} for section, fields in values.items()
+        section: {k: "default" for k in fields}
+        for section, fields in values.items()
     }
 
     if not path.exists():
         return values, sources
 
     try:
-        data = json.loads(
-            path.read_text(encoding="utf-8"), object_pairs_hook=_unique_keys
-        )
+        data = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_unique_keys)
 
     except SettingsError as exc:
         raise SettingsError(f"{path.name}: {exc}")
@@ -492,7 +443,6 @@ def _cross_check(values, where):
 # ============================================================
 # WRITING
 # ============================================================
-
 
 def document(values=None, existing=None):
     """
@@ -583,16 +533,12 @@ if __name__ == "__main__":
     else:
         values, sources = load()
 
-        print(
-            f"Settings file: {SETTINGS_FILE} "
-            f"({'found' if SETTINGS_FILE.exists() else 'not found; all defaults'})"
-        )
+        print(f"Settings file: {SETTINGS_FILE} "
+              f"({'found' if SETTINGS_FILE.exists() else 'not found; all defaults'})")
 
         for line in describe(values, sources):
             print(line)
 
         print()
-        print(
-            "python settings.py write   creates or refreshes a fully commented "
-            "dice-skit.json, keeping your current values."
-        )
+        print("python settings.py write   creates or refreshes a fully commented "
+              "dice-skit.json, keeping your current values.")

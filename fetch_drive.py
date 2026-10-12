@@ -2,7 +2,7 @@
 Fetch dialogue audio from a public Google Drive folder.
 
 Walks a shared Drive folder recursively, picks out every audio file, and
-downloads the ones this project does not already have into human_gen/,
+downloads the ones this project does not already have into input/human_gen/,
 flattening Drive's subdirectory structure.
 
     python fetch_drive.py https://drive.google.com/drive/folders/<id>
@@ -18,14 +18,14 @@ will work.
 
 Where files land
 ----------------
-Everything goes into human_gen/ as one flat directory, whatever Drive's folder
-structure was. The Drive folder holds human-recorded takes, which is why they
-are kept apart from machine_gen/ (Sarvam TTS output) and from the curated files
-and from the finished master in dialogues-mp3/. stitch_mp3.py searches these
-in precedence order:
+Everything goes into input/human_gen/ as one flat directory, whatever Drive's
+folder structure was. The Drive folder holds human-recorded takes, which is why
+they are kept apart from in-out/machine_gen/ (Sarvam TTS output) and from the
+finished master in output/master/. stitch_mp3.py searches these in precedence
+order:
 
-    1. human_gen/       recordings from Drive     <- this script writes here
-    2. machine_gen/     TTS output
+    1. input/human_gen/      recordings from Drive     <- this script writes here
+    2. in-out/machine_gen/   TTS output
 
 Flattening is deliberate: stitch_mp3.py matches files by their leading sequence
 number, so Drive's folder layout carries no information the pipeline needs.
@@ -53,6 +53,7 @@ from pathlib import Path
 
 import audio_common as common
 from concat_backends import atomic_install, temp_path_for
+
 
 # ============================================================
 # CONFIGURATION
@@ -169,7 +170,8 @@ def parse_arguments(argv):
 
                 except ValueError:
                     print(
-                        f"ERROR: limit must be a positive integer, got " f'"{value}".'
+                        f'ERROR: limit must be a positive integer, got '
+                        f'"{value}".'
                     )
                     print()
                     print(USAGE)
@@ -228,7 +230,6 @@ def extract_folder_id(url):
 # ============================================================
 # LISTING
 # ============================================================
-
 
 def enable_system_certificates():
     """
@@ -318,7 +319,7 @@ def list_remote_audio(gdown, folder_id, cookies):
         print(f"  {exc}")
         print()
         print("Common causes:")
-        print('  - the folder is not shared as "Anyone with the link"')
+        print("  - the folder is not shared as \"Anyone with the link\"")
         print("  - the link points at a file rather than a folder")
         print("  - network or proxy blocking drive.google.com")
         print()
@@ -331,7 +332,8 @@ def list_remote_audio(gdown, folder_id, cookies):
         print("No files found in that folder.")
         print()
         print(
-            "If the folder definitely has contents, it is probably not " "link-shared."
+            "If the folder definitely has contents, it is probably not "
+            "link-shared."
         )
         sys.exit(1)
 
@@ -379,7 +381,6 @@ def list_remote_audio(gdown, folder_id, cookies):
 # ============================================================
 # PLANNING
 # ============================================================
-
 
 def local_inventory():
     """
@@ -429,10 +430,9 @@ def plan_downloads(audio, overwrite=False, limit=None):
 
     sequences, names = local_inventory()
 
-    print(
-        f"Searched               : "
-        + ", ".join(d.name for d in common.search_directories())
-    )
+    print(f"Searched               : " + ", ".join(
+        d.name for d in common.search_directories()
+    ))
     print(f"Local sequence numbers : {len(sequences)}")
     print(f"Local files            : {len(names)}")
     print(f"Download destination   : {common.HUMAN_GEN_DIRECTORY}")
@@ -512,7 +512,6 @@ def plan_downloads(audio, overwrite=False, limit=None):
 # DOWNLOADING
 # ============================================================
 
-
 def download_one(gdown, record, cookies):
     """
     Download a single Drive file into place.
@@ -567,7 +566,9 @@ def run_downloads(gdown, to_fetch, cookies):
 
     for index, record in enumerate(to_fetch, start=1):
         print()
-        print(f"[{index}/{len(to_fetch)}] {record['remote_path'].as_posix()}")
+        print(
+            f"[{index}/{len(to_fetch)}] {record['remote_path'].as_posix()}"
+        )
 
         try:
             size = download_one(gdown, record, cookies)
@@ -605,7 +606,6 @@ def run_downloads(gdown, to_fetch, cookies):
 # ============================================================
 # MAIN
 # ============================================================
-
 
 def main():
 
@@ -676,7 +676,9 @@ def main():
         print("=" * 70)
         print("NOTHING TO DO")
         print("=" * 70)
-        print("Every audio file in the Drive folder is already present locally.")
+        print(
+            "Every audio file in the Drive folder is already present locally."
+        )
         print("Use overwrite=1 to re-fetch anyway.")
         print()
 

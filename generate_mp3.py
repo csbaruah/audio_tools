@@ -10,7 +10,7 @@ exits 0.
 
 Why it is disabled
 ------------------
-The dialogue MP3s in dialogues-mp3/ are treated as already generated. Re-
+The dialogue MP3s in in-out/machine_gen/ are treated as already generated. Re-
 stitching them should not require a Sarvam API key, a network round-trip, or
 paying to re-synthesise every row. Stitching now lives in stitch_mp3.py and
 runs entirely independently of this file.
@@ -45,6 +45,7 @@ the private copies the original single-file script used.
 import sys
 
 import audio_common as common
+
 
 # Master switch: tts.enabled in dice-skit.json. Turn it on only after
 # uncommenting the blocks below.
@@ -292,7 +293,6 @@ TTS_ENABLED = common.TTS_ENABLED
 # MAIN
 # ============================================================
 
-
 def main():
 
     print()
@@ -304,8 +304,12 @@ def main():
         print()
         print("TTS generation is DISABLED.")
         print()
-        print("This stage is intentionally switched off: the dialogue MP3s in")
-        print(f"{common.OUT_DIRECTORY} are assumed to be already generated.")
+        print(
+            "This stage is intentionally switched off: the dialogue MP3s in"
+        )
+        print(
+            f"{common.OUT_DIRECTORY} are assumed to be already generated."
+        )
         print()
         print("To enable generation:")
         print("    1. pip install sarvamai python-dotenv")
