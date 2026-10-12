@@ -142,6 +142,15 @@ Step 4 - Python packages for TTS generation (optional)
 
   Also see section 7 for the API key.
 
+Step 5 - Tests and formatting checks (contributors)
+
+      python -m pip install -r requirements-dev.txt
+      python -m pytest -q
+      python -m black --check tests
+
+  GitHub Actions runs these checks on pull requests to main and pushes to
+  main. The tests use temporary fixtures; they do not need the audio library.
+
 
 ------------------------------------------------------------------------------
 3. USING IT WITH NO CONFIGURATION CHANGES
@@ -394,6 +403,11 @@ Modules (used by the programs)
   layout.py            The input / in-out / output folder layout: moves an
                        old project into it, and runs "clean". (study
                        sec. 14)
+  tests\               Fixture-based tests for layout migration, settings,
+                       CSV loading and pre-flight checks.
+  requirements-dev.txt pytest and Black for running the test suite locally.
+  .github\workflows\tests.yml
+                       Runs the tests and formatting check on GitHub.
   background_score.py  Reads cue strings and mixes background music under a
                        line. (study sec. 10)
 

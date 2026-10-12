@@ -6,6 +6,11 @@ Sep 11 entries are UTC). Section numbers (sec.) refer to
 docs\audio-concat-study.md.
 
 
+2026-10-12  Automated tests and pull-request checks
+    Added fixture-based tests for folder migration, settings and CSV pre-flight
+    validation. GitHub Actions runs the suite and checks test formatting for
+    pull requests targeting main.
+
 2026-10-08  Input / in-out / output folders and "clean" (sec. 14)
     Folders now sit under input\ (script, recordings), in-out\ (TTS) and
     output\ (master, work, log), each relocatable in dice-skit.json. Old
