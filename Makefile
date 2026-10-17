@@ -3,8 +3,7 @@ PYTHON ?= python
 .PHONY: test release release-windows android clean
 
 test:
-	$(PYTHON) -m pytest -q
-	$(PYTHON) -m black --check tests modaud.py make_release.py
+	$(PYTHON) scripts/run_tests.py --python "$(PYTHON)"
 
 release: release-windows
 

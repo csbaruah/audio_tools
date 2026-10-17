@@ -501,7 +501,9 @@ useful for Windows C/C++ work and for running the `make release` command in
    gdb --version
    ```
 
-From the repository, `make test` runs the tests and Black check,
+From the repository, `make test` runs pytest verbosely and the Black check.
+Named test results and both commands' output are streamed to the terminal and
+saved in a timestamped `output\log\tests-*.log` file.
 `make release-windows` runs those checks before building the Windows console
 executable, and `make clean` removes only `output\release\`. `make release` is
 retained as an alias for `make release-windows`. `make android` reports that no

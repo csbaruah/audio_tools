@@ -149,13 +149,18 @@ Step 4 - Python packages for TTS generation (optional)
 Step 5 - Tests and formatting checks (contributors)
 
       python -m pip install -r requirements-dev.txt
-      python -m pytest -q
-      python -m black --check tests
+      make test
 
-      With GNU Make installed, "make test" runs both checks.
+  The terminal shows each test name and its result, then checks formatting
+  with Black. The full output is also saved in
+  output\log\tests-<date-time>.log. To run without Make:
 
-  GitHub Actions runs these checks on pull requests to main and pushes to
-  main. The tests use temporary fixtures; they do not need the audio library.
+      python scripts\run_tests.py
+
+  GitHub Actions installs GNU Make and runs the same "make test" target on
+  pull requests to main and pushes to main. To block merging when it fails,
+  configure "Tests / tests" as a required status check in repository rules.
+  The tests use temporary fixtures; they do not need the audio library.
 
 Step 6 - Build the Windows console release (optional)
 
@@ -174,7 +179,7 @@ Step 6 - Build the Windows console release (optional)
 
   Other Make targets:
 
-      make test             run tests and formatting checks
+      make test             run tests and formatting checks; save full log
       make clean            remove only output\release\
       make android          not configured until an Android framework is chosen
 
@@ -452,6 +457,8 @@ Programs (run these)
                        then stitch_mp3.py options.
   make_release.py      Builds the Windows executable, bundles FFmpeg tools,
                        and stages the sample project.
+  scripts\run_tests.py Runs pytest verbosely and Black; displays and saves
+                       results to output\log\tests-<date-time>.log.
   Makefile             test, release-windows (also release), android and clean
                        targets.
   requirements-build.txt
