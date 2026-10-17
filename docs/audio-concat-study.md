@@ -22,7 +22,10 @@ background score under a line, section 11 evening out loudness across lines,
 and section 12 the settings file, dice-skit.json. Section 13 proposes, but
 does not yet implement, a graphical interface for Windows, Android, iOS and
 the web. Section 14 describes the input / in-out / output folder layout and
-the clean command.
+the clean command. Section 15 records the longer-term hybrid product
+direction. Section 16 proposes the first Windows executable as a local
+processing prototype. Section 0.13 covers the optional MSYS2 Windows
+development toolchain.
 
 ---
 
@@ -455,6 +458,77 @@ python stitch_mp3.py                               # strict; or s
 python stitch_mp3.py help                          # every flag
 Get-Content (Get-ChildItem log\*.log | Sort LastWriteTime -Desc)[0].FullName -Tail 40
 ```
+
+### 0.13 Install the Windows development toolchain with MSYS2 (optional)
+
+This installs native Windows versions of GNU Make, GCC, G++, and GDB. It is
+useful for Windows C/C++ work and for running the `make release` command in
+§16. It is separate from the Python/audio prerequisites above.
+
+1. Install MSYS2 from [msys2.org](https://www.msys2.org/), or from an
+   elevated PowerShell window:
+
+   ```powershell
+   winget install --id MSYS2.MSYS2
+   ```
+
+2. Launch **MSYS2 UCRT64** from the Start menu. Use this terminal for the
+   following `pacman` commands.
+
+3. Update the MSYS2 package database and base packages:
+
+   ```bash
+   pacman -Syu
+   ```
+
+   If the update asks you to close the terminal, close it, launch MSYS2 UCRT64
+   again, and run `pacman -Syu` once more.
+
+4. Install the build tools, UCRT64 compiler toolchain, and debugger:
+
+   ```bash
+   pacman -S --needed base-devel mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-gdb
+   ```
+
+   Accept the default package selection when prompted.
+
+5. Verify the tools in MSYS2 UCRT64:
+
+   ```bash
+   make --version
+   gcc --version
+   g++ --version
+   gdb --version
+   ```
+
+From the repository, `make test` runs the tests and Black check,
+`make release-windows` runs those checks before building the Windows console
+executable, and `make clean` removes only `output\release\`. `make release` is
+retained as an alias for `make release-windows`. `make android` reports that no
+Android build has been configured; choose the app framework and its build
+command before wiring that target to a real build.
+
+For this project's Windows release build, the same terminal must also resolve
+the **Windows** Python interpreter, `ffmpeg.exe` and `ffprobe.exe`:
+
+```bash
+which python
+which ffmpeg
+which ffprobe
+```
+
+If they are not found, add their Windows installation folders to the Windows
+user `PATH` (for example, `C:\Program Files\python` and
+`C:\installable\ffmpeg\bin` on this machine), then open a new MSYS2 UCRT64
+terminal. Confirm `python --version`, `ffmpeg -version` and `ffprobe -version`
+before running `make release` from the project folder. The release is a
+Windows executable, so do not use WSL's Linux Python to build it.
+
+MSYS2 provides native Windows development tools; it is not WSL. WSL2 is a
+separate Linux environment and is useful for Linux-targeted work. This GCC/G++
+installation is a general-purpose Windows compiler, not an embedded-board
+cross compiler. Android native builds use the Android NDK's Clang toolchain;
+install and configure the NDK with the selected Android framework.
 
 ---
 
@@ -2608,7 +2682,7 @@ phone apps exist.
 |---|---|---|
 | 1 | GUI framework | Flet (§13.3) |
 | 2 | Mobile audio engine | Build FFmpeg as a library, or use a maintained community FFmpegKit fork; evaluate both at step 4 |
-| 3 | Can the phone apps work fully offline, or may they send builds to the server? | Offline, using the bundled engine. Server mode is optional. |
+| 3 | How should processing be split between device and server? | Hybrid: responsive/local work on-device, with optional server processing for suitable heavy jobs and cloud features (§15). |
 | 4 | Where projects live on phones | The app's own storage, with import and export through the system file picker |
 | 5 | FFmpeg licence and build options (LGPL vs GPL, which codecs) | Settle before the first public release, especially for app-store distribution |
 | 6 | Code-signing certificates and store accounts | Needed before distribution; not needed for development |
@@ -2746,6 +2820,186 @@ On the real project:
 | Second attempt, file closed | 6 items moved, `dice-skit.json` updated; all 79 files identical to a safety copy taken first |
 | `strict=0` build in the new layout | Exit 0; master byte-identical to the one built just before the move |
 | Backup hook | Now covers `input\dialogues_new.csv` and `gui\`; no audio and nothing from `output\` |
+
+---
+
+## 15. Product direction: hybrid processing (decided 2026-10-17)
+
+> **Decision:** A **hybrid approach** is likely the most flexible longer-term
+> option. This is a product direction, not an implementation commitment about
+> which operation must run locally or remotely.
+
+The product is expected to grow beyond command-line audio stitching into a
+Windows application with a UI, Android and potentially iOS apps, audio editing,
+later video editing, and monthly subscriptions. No single current script or
+desktop packaging format should dictate the architecture for all those
+platforms.
+
+### 15.1 Responsibilities
+
+- **On-device:** project browsing, responsive editing interactions and preview,
+  and processing that can reasonably run locally. Preserve offline capability
+  where feasible and keep user media local unless a feature needs otherwise.
+- **Server, when useful:** optional compute-heavy jobs, cloud projects or
+  cross-device features. Uploading media must be explicit, with secure transfer,
+  access control, retention/deletion rules, job progress and cost controls.
+- **Shared boundary:** define a portable project format and processing
+  interface. The UI should call that interface rather than depend directly on
+  script globals, console output or a single platform's filesystem layout.
+- **Subscriptions:** paid access must be checked through an appropriate
+  entitlement mechanism, not trusted solely to a client-side setting.
+  Payment flows must be selected to satisfy the applicable Windows, Google
+  Play and Apple distribution rules before implementation.
+
+This direction accepts the trade-off: local execution improves privacy,
+offline availability and interactive response, while server processing can
+provide consistent, centrally updated and compute-intensive operations but
+adds networking, privacy, operational and hosting costs. The first Windows
+executable in §16 is deliberately a local prototype; it does not decide that
+the eventual product must be local-only.
+
+### 15.2 Architectural sequence
+
+1. Define project and operation interfaces before tying the future UI to
+   command-line entry points.
+2. Package the existing local stitch pipeline for Windows as a bounded
+   prototype (§16).
+3. Build the Windows UI against the processing interface; keep editing
+   projects portable.
+4. Design the audio editing/timeline model before adding destructive media
+   operations; extend it for video only when the product scope is clear.
+5. Evaluate mobile processing engines and platform constraints, then choose
+   which operations stay local and which may be offered as server jobs.
+6. Add accounts, subscription entitlements, and payment flows after deciding
+   which features are paid and how platform policies apply.
+
+The ordering is provisional; technical feasibility, user needs and operating
+costs may change it. In particular, a hybrid design does not require building
+the server before a useful local Windows prototype exists.
+
+---
+
+## 16. First Windows executable: local-processing prototype
+
+> **Console prototype implemented and tested 2026-10-17.** The target is
+> `output\release\modaud.exe`, with `output\release\ffmpeg\` and a
+> self-contained sample project beside it. This is a packaging and workflow
+> prototype, not the final multi-platform application architecture in §15.
+
+### 16.1 Release contents and build entry point
+
+The `release` Makefile target invokes `make_release.py`. The Python script
+prepares the release folder, packages the existing application with PyInstaller
+and stages the sample project. The build machine needs Python, the project's
+build dependencies, PyInstaller, GNU Make, and `ffmpeg.exe` plus `ffprobe.exe`
+on `PATH`. These are build-machine tools, not runtime requirements for users
+of the packaged executable.
+
+Current targets are `make test` (pytest and Black), `make release-windows`
+(`make release` is an alias), and `make clean` (removes only the generated
+`output\release\` tree). `make android` deliberately exits with a message until
+an Android framework and build command are selected.
+
+Release layout:
+
+```
+output\release\
+  modaud.exe
+  README.txt
+  ffmpeg\
+    ffmpeg.exe
+    ffprobe.exe
+    [DLLs required by the selected FFmpeg build, if any]
+    [applicable FFmpeg license and notices]
+  sample_project\
+    dice-skit.json
+    input\
+      dialogues_new.csv
+      human_gen\
+        [three selected dialogue MP3s and every referenced audio asset]
+    in-out\
+      machine_gen\
+    output\
+```
+
+The executable uses the existing stitch pipeline rather than forking its
+audio behaviour. `audio_tools.py` supports a bundled FFmpeg directory through
+`DICE_SKIT_FFMPEG_DIR`; the packaged launcher sets it to the release's sibling
+`ffmpeg` folder before the first tool lookup. Both `ffmpeg.exe` and
+`ffprobe.exe` are required by current features. The release builder resolves
+them from the build machine's `PATH`, verifies that they run, and stages any
+runtime DLLs found beside them. `ffplay.exe` is not required by the current
+pipeline.
+
+The sample CSV has three rows matched to three selected MP3s. Its rows
+demonstrate distinct `filler_before`, `filler_after`,
+`background_score` and `score_cues` behaviour. Every named filler or score
+asset referenced by those rows is included in the sample project's
+`human_gen` folder. The cue strings were validated by a sample dry run. Before
+public distribution, listen to the generated master as well. The bundled README
+explains how to run the sample or pass another project folder to the executable.
+
+The executable takes the project folder as its first argument and forwards
+remaining arguments to the existing stitch command. The launcher configures
+the pipeline from that project, so the current working directory does not
+select the project.
+
+### 16.2 Generated-file marker and free-tier limits
+
+**Proposed requirement:** mark audio outputs produced by `modaud` so a later
+run can recognize them when applying a free-use limit to files supplied for
+concatenation. This marker is not implemented or validated.
+
+For MP3, evaluate a namespaced ID3 metadata frame (for example, a custom
+`TXXX` frame) containing an application identifier and marker version. This
+is metadata at the start of an MP3 file, not a change to the encoded MPEG
+audio frames. Do not insert arbitrary bytes into the MPEG frame stream: that
+could make files invalid or impair playback.
+
+Treat this metadata as **provenance information, not trustworthy proof of
+payment or a security boundary**. A user or another tool can remove, alter or
+copy it; a local executable cannot safely protect a signing secret embedded
+inside itself. Therefore:
+
+- A marker may help identify ordinary outputs from this executable and inform
+  a friendly local limit or warning, but must not be described as tamper-proof.
+- If the free limit must be robust against deliberate circumvention, enforce
+  entitlements through an account/service or another design reviewed for that
+  threat model. A server-issued authenticated marker can authenticate a
+  marker, but removing metadata still means a purely local scanner cannot
+  prove a file's origin.
+- Do not count or reject files based only on a marker until the free-limit
+  policy is defined, including what counts as a file and how imported,
+  edited, copied and concatenated outputs are treated.
+- Test metadata survival through the existing FFmpeg conversions, the native
+  MP3 joiner, other common editors and export paths. If normal processing strips
+  tags, decide whether to reapply the marker to final outputs and document the
+  resulting limitations.
+
+Before shipping this feature, settle the quota policy and user messaging,
+choose a metadata format and versioning scheme, verify that the marker does
+not affect playback, and assess privacy and licensing implications. The
+application marker must not contain personal data or an API key.
+
+### 16.3 Verification
+
+The packaged prototype was built on Windows and run without FFmpeg on the
+process `PATH`:
+
+| Check | Result |
+|---|---|
+| `make test` | 36 passed, 1 symlink test skipped because directory symlink creation is not permitted; Black check passed |
+| `make release-windows` | PyInstaller created `output\release\modaud.exe` |
+| Bundled tools | `ffmpeg.exe`, `ffprobe.exe` and the source `LICENSE` copied to `ffmpeg\` |
+| Sample dry run | 3 of 3 dialogue files matched; all three distinct cue strings parsed and the project passed pre-flight |
+| Sample build | Exit 0; master duration 190.166 seconds (about 190.2 seconds) |
+| `make clean` | Removed only `output\release\`; a read-only OneDrive directory was made writable for removal |
+| `make android` | Exited with the expected not-configured message |
+| Generated-file marker | Not implemented; see §16.2 |
+
+Before public distribution, exercise the Makefile target on a clean Windows
+build machine and review FFmpeg's build-specific redistribution obligations,
+signing and the free-limit policy.
 
 ---
 
