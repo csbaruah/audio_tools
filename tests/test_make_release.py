@@ -1,4 +1,5 @@
 import csv
+import json
 
 import pytest
 
@@ -35,17 +36,65 @@ def test_find_tool_requires_executable_on_path(monkeypatch):
         make_release.find_tool("ffmpeg")
 
 
+def test_release_readme_includes_requested_main_readme_sections(tmp_path):
+    (tmp_path / "README.txt").write_text(
+        "Project intro\n"
+        "4. COMMAND-LINE OPTIONS\ncommand options\n"
+        "5. SETTINGS FILE (config.json)\nsettings details\n"
+        "6. THE SCRIPT FILE (input\\<csv_file>)\nCSV details\n"
+        "7. OTHER SECTION\nnot requested\n"
+        "9. TROUBLESHOOTING\ntroubleshooting details\n",
+        encoding="utf-8",
+    )
+
+    readme = make_release.release_readme(tmp_path)
+
+    for text in (
+        "command options",
+        "settings details",
+        "CSV details",
+        "troubleshooting details",
+    ):
+        assert text in readme
+    assert "not requested" not in readme
+
+
+def test_release_readme_fails_if_main_section_is_missing(tmp_path):
+    (tmp_path / "README.txt").write_text("4. COMMAND-LINE OPTIONS\n")
+
+    with pytest.raises(make_release.ReleaseError, match="missing section"):
+        make_release.release_readme(tmp_path)
+
+
 def test_sample_project_has_three_rows_and_all_referenced_assets(tmp_path):
     project_root = tmp_path / "source"
     source_media = project_root / "input" / "human_gen"
     source_media.mkdir(parents=True)
+    stale_csv = tmp_path / "release" / "sample_project" / "input" / "dialogues_new.csv"
+    stale_csv.parent.mkdir(parents=True)
+    stale_csv.write_text("stale")
     for filename in make_release.SAMPLE_AUDIO + make_release.SAMPLE_ASSETS:
         (source_media / filename).write_bytes(filename.encode())
-    (project_root / "dice-skit.json").write_text("{}")
+    (project_root / "config.json").write_text(
+        json.dumps(
+            {
+                "csv_file": "dialogues_new.csv",
+                "run": {"strict": False},
+                "paths": {"input": "input"},
+            }
+        )
+    )
 
     sample = make_release.write_sample_project(project_root, tmp_path / "release")
-    csv_path = sample / "input" / "dialogues_new.csv"
+    csv_path = sample / "input" / "dialogues.csv"
+    config = json.loads((sample / "config.json").read_text(encoding="utf-8"))
 
+    assert config["csv_file"] == "dialogues.csv"
+    assert config["run"]["strict"] is False
+    assert config["paths"]["input"] == "input"
+    assert "csv" not in config["paths"]
+    assert not (sample / "dice-skit.json").exists()
+    assert not stale_csv.exists()
     with csv_path.open(encoding="utf-8-sig", newline="") as handle:
         rows = list(csv.DictReader(handle))
 
@@ -62,6 +111,7 @@ def test_sample_project_has_three_rows_and_all_referenced_assets(tmp_path):
 def test_sample_project_fails_for_missing_media(tmp_path):
     project_root = tmp_path / "source"
     (project_root / "input" / "human_gen").mkdir(parents=True)
+    (project_root / "config.json").write_text('{"csv_file": "dialogues_new.csv"}')
 
     with pytest.raises(make_release.ReleaseError, match="sample asset is missing"):
         make_release.write_sample_project(project_root, tmp_path / "release")

@@ -2,8 +2,8 @@ DICE-SKIT AUDIO PIPELINE
 ========================
 
 Builds one finished audio file, output\master\master_dialogues.mp3, from a
-script of dialogue lines (input\dialogues_new.csv) and one recorded or
-generated audio file per line.
+dialogue CSV named in config.json (input\dialogues_new.csv in this repository)
+and one recorded or generated audio file per line.
 
 The production it was built for is "The Dice of Destiny", a 20-minute
 Mahabharata skit (The_Dice_of_Destiny_20min_v13.html).
@@ -20,8 +20,8 @@ CONTENTS
   2. Prerequisites and installation
   3. Using it with no configuration changes
   4. Command-line options
-  5. Settings file (dice-skit.json)
-  6. The script file (dialogues_new.csv)
+  5. Settings file (config.json)
+  6. The dialogue CSV file
   7. The Sarvam TTS API key
   8. What each file does
   9. Troubleshooting
@@ -32,7 +32,7 @@ CONTENTS
 ------------------------------------------------------------------------------
 
   * Joins every line's audio into one master, in the order of the rows in
-    dialogues_new.csv.
+    the configured dialogue CSV.
 
   * Finds each line's audio by the take number at the start of its filename,
     e.g. 129_Krishna.m4a is take 129. Two folders are searched:
@@ -64,7 +64,7 @@ CONTENTS
     unconvertible audio is reported in one list. Three mistakes always
     stop the build, because they would produce a master that sounds complete
     but is wrong (study sec. 9):
-      - dialogues_new.csv is missing
+      - the configured dialogue CSV is missing
       - a file has no character name in its name (e.g. 4.mp3)
       - two files in one folder claim the same take number
     A fourth, a file's character name not matching its CSV row, stops only
@@ -244,7 +244,7 @@ Use the default strict mode for the final build.
 ------------------------------------------------------------------------------
 
 Options may be given in any order. A command-line option overrides
-dice-skit.json for that one run.
+config.json for that one run.
 
 stitch_mp3.py  (builds the master)
 
@@ -273,7 +273,7 @@ stitch_mp3.py  (builds the master)
 fetch_drive.py  (downloads recordings into input\human_gen\)
 
   <link or ID>  The shared Google Drive folder. Optional if drive.folder_url
-                is set in dice-skit.json.
+                is set in config.json.
   dry=1         List what would be downloaded; download nothing.
   overwrite=1   Download even files already present.
   limit=N       Stop after N downloads (for a trial).
@@ -282,8 +282,8 @@ fetch_drive.py  (downloads recordings into input\human_gen\)
 settings.py  (the settings file)
 
   python settings.py          List every setting, its value, and where it
-                              came from (built-in default or dice-skit.json).
-  python settings.py write    Create or refresh dice-skit.json with full
+                              came from (built-in default or config.json).
+  python settings.py write    Create or refresh config.json with full
                               comments, keeping your current values and any
                               comments you added.
 
@@ -298,24 +298,35 @@ modaud.exe  (Windows console release; built by "make release")
   Example:
       output\release\modaud.exe "C:\Projects\my audio" strict=0
 
-  The project folder contains input\dialogues_new.csv and optionally
-  dice-skit.json. The executable uses its sibling ffmpeg\ folder, writes
-  output to the project's configured folders, and accepts stitch_mp3.py
-  options. TTS generation and the GUI are not part of this prototype.
+  The project folder contains one config.json, which names the CSV inside
+  input\ and contains every pipeline setting. The executable uses its sibling
+  ffmpeg\ folder, writes to configured output folders, and accepts
+  stitch_mp3.py options. TTS generation and the GUI are not part of this
+  prototype.
 
 
 ------------------------------------------------------------------------------
-5. SETTINGS FILE (dice-skit.json)
+5. SETTINGS FILE (config.json)
 ------------------------------------------------------------------------------
 
-dice-skit.json, beside the scripts, holds every adjustable setting. EACH
-SETTING IS EXPLAINED INSIDE THE FILE ITSELF: the key "_name" right after
+config.json, in the project root, names the dialogue CSV inside input and
+holds every adjustable setting. For example:
+
+      {
+        "csv_file": "dialogues.csv",
+        "version": 1,
+        "run": { "strict": true },
+        "paths": { "input": "input", "in_out": "in-out", "output": "output" }
+      }
+
+EACH SETTING IS EXPLAINED INSIDE THE FILE ITSELF: the key "_name" right after
 "name" says what it does, the range of values allowed, and how to choose one.
 Read the file for detail; this is only an overview.
 
 Rules:
   * Keys starting with _ are comments and are ignored.
-  * Delete a setting, or the whole file, to use the built-in default.
+  * Delete a setting to use its built-in default. Keep config.json and its
+    required csv_file entry.
   * A typo, a wrong type or an out-of-range value stops the run with a
     message naming the setting, before any audio is touched.
   * Never put the Sarvam API key in this file (see section 7).
@@ -325,9 +336,9 @@ Rules:
   run                strict (default true), backend (auto / ffmpeg / python),
                      batch_size
   paths              input, in_out, output (the three top folders; may be
-                     absolute, e.g. D:/dice-skit-output), then csv,
-                     human_gen, machine_gen, master_dir, work, log, the
-                     master filename, search_order (which folder wins)
+                     absolute, e.g. D:/audio-output), then human_gen,
+                     machine_gen, master_dir, work, log,
+                     the master filename, search_order (which folder wins)
   output             format (mp3), sample_rate (24000), bitrate (128000),
                      mono (true)
   fillers            short_seconds (2, the default gap), long_seconds (10)
@@ -351,10 +362,16 @@ sec. 12 covers the design.
 
 
 ------------------------------------------------------------------------------
-6. THE SCRIPT FILE (input\dialogues_new.csv)
+6. THE SCRIPT FILE (input\<csv_file>)
 ------------------------------------------------------------------------------
 
-One row per line, played in row order. Columns:
+config.json must contain a "csv_file" string with the CSV filename only (no
+folder path). That file must be inside the configured input folder. For
+example, {"csv_file": "dialogues.csv"} selects input\dialogues.csv. This
+repository's config.json selects dialogues_new.csv. A missing or invalid
+config.json stops the run before audio is touched.
+
+The selected CSV has one row per line, played in row order. Columns:
 
   sequence_number   The take number. A whole number that must never change
                     once a line is recorded; see "Revising the script" below.
@@ -397,8 +414,8 @@ tool reads only the CSV.
 The key is needed ONLY to generate lines with generate_mp3.py, which is off
 by default. Building the master never needs it.
 
-The key is never stored in dice-skit.json, because that file gets copied and
-shared. tts.api_key_source in dice-skit.json says where the key is:
+The key is never stored in config.json, because that file gets copied and
+shared. tts.api_key_source in config.json says where the key is:
 
   "env" (default) - an environment variable called SARVAM_API_KEY.
     Either create a file named .env in the dice-skit folder containing:
@@ -421,7 +438,7 @@ shared. tts.api_key_source in dice-skit.json says where the key is:
         python -m pip install --user keyring
         python -c "import keyring; keyring.set_password('dice-skit', 'SARVAM_API_KEY', 'your_actual_api_key')"
 
-    Then set "tts": { "api_key_source": "keyring" } in dice-skit.json. You can
+    Then set "tts": { "api_key_source": "keyring" } in config.json. You can
     view or delete the key in Control Panel > Credential Manager.
 
 To turn generation on:
@@ -429,7 +446,7 @@ To turn generation on:
   2. Provide the key as above.
   3. Uncomment the four blocks marked "--- UNCOMMENT TO ENABLE ---" in
      generate_mp3.py.
-  4. Set "tts": { "enabled": true } in dice-skit.json.
+  4. Set "tts": { "enabled": true } in config.json.
   5. python generate_mp3.py
 Generation uses API credit. tts.overwrite_existing (false by default) keeps
 lines already generated.
@@ -440,6 +457,7 @@ lines already generated.
 ------------------------------------------------------------------------------
 
 Programs (run these)
+  config.json          Names the dialogue CSV file inside input.
   stitch_mp3.py        Builds the master. Reads the CSV, finds each line's
                        audio, runs every check, levels loudness, mixes
                        background music, converts formats, inserts fillers,
@@ -449,14 +467,15 @@ Programs (run these)
                        present.
   generate_mp3.py      Generates missing lines with Sarvam TTS into
                        in-out\machine_gen\. Switched off by default.
-  settings.py          Loads and checks dice-skit.json. Holds every setting's
+    settings.py          Loads and checks config.json. Holds every setting's
                        default, allowed range and help text. Run it to list
                        the settings, or "write" to refresh the file.
   modaud.py            Console entry point packaged as
                        output\release\modaud.exe. Takes a project folder,
                        then stitch_mp3.py options.
   make_release.py      Builds the Windows executable, bundles FFmpeg tools,
-                       and stages the sample project.
+                       stages the sample project, and creates a release
+                       README with sections 4, 5, 6 and 9 from this file.
   scripts\run_tests.py Runs pytest verbosely and Black; displays and saves
                        results to output\log\tests-<date-time>.log.
   Makefile             test, release-windows (also release), android and clean
@@ -485,7 +504,8 @@ Modules (used by the programs)
                        line. (study sec. 10)
 
 Configuration and data
-  dice-skit.json       All adjustable settings, with a comment on each.
+  config.json          The dialogue CSV filename and all adjustable settings,
+                       with a comment on each.
   input\dialogues_new.csv
                        The script: lines, order, fillers, background music.
   dialogues_new_xcel.xlsx       Earlier spreadsheet form of the script.
@@ -523,8 +543,12 @@ Folders (study sec. 14)
 
   Message                       What to do
   ----------------------------  ----------------------------------------------
-  ERROR in settings: ...        dice-skit.json has a mistake; the message names
+  ERROR in settings: ...        config.json has a mistake; the message names
                                 the setting. Fix it, or delete that key.
+  ERROR: config.json ...        Create or correct config.json; csv_file must be
+                                a .csv filename without a folder path.
+  dice-skit.json is deprecated  Merge its settings into config.json, add
+                                csv_file, then stop using the old file.
   MISSING (...)                 Normal while recordings are incomplete. Fetch
                                 them, or run with strict=0.
   CHARACTER MISMATCH            A file's name gives a different character from

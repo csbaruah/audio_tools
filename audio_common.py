@@ -23,15 +23,14 @@ from pathlib import Path
 
 import audio_tools
 
-
 # ============================================================
 # CONFIGURATION
 # ============================================================
 #
-# Values come from dice-skit.json through settings.py (section 12 of
+# Values come from config.json through settings.py (section 12 of
 # docs/audio-concat-study.md). The defaults live in settings.SPEC, so a missing
 # file or key changes nothing. The names below are unchanged so the rest of the
-# pipeline reads them as before; edit dice-skit.json, not this block.
+# pipeline reads them as before; edit config.json, not this block.
 
 import settings as _settings
 
@@ -58,20 +57,59 @@ INPUT_EXTENSIONS = (
 # Every name configure() binds. Listed so the global statement below stays in
 # step with the assignments.
 _CONFIGURED = (
-    "SETTINGS", "SETTINGS_SOURCES", "BASE_DIRECTORY", "SETTINGS_FILE",
-    "_RUN", "_PATHS", "_OUTPUT", "_FILLERS", "_SCORE", "_LOUDNESS", "_TTS",
-    "INPUT_DIRECTORY", "IN_OUT_DIRECTORY", "OUTPUT_DIRECTORY",
-    "CSV_FILE", "OUT_DIRECTORY", "HUMAN_GEN_DIRECTORY", "MACHINE_GEN_DIRECTORY",
-    "WORK_DIRECTORY", "LOG_DIRECTORY", "MASTER_FILE", "_SOURCE_DIRECTORIES",
-    "TTS_ENABLED", "TTS_API_KEY_SOURCE", "LANGUAGE_CODE", "MODEL", "PACE",
-    "SPEECH_SAMPLE_RATE", "OUTPUT_AUDIO_CODEC", "OVERWRITE_EXISTING",
-    "SHORT_FILLER", "SHORT_FILLER_SECONDS", "LONG_FILLER", "LONG_FILLER_SECONDS",
-    "GENERATED_FILLERS", "CONCAT_BACKEND", "OUTPUT_FORMAT",
-    "TARGET_SAMPLE_RATE", "TARGET_BITRATE", "TARGET_MONO", "FILLER_BITRATE",
-    "NORMALIZED_DIRECTORY", "DIALOGUE_LOUDNESS", "DIALOGUE_TARGET_LUFS",
-    "DIALOGUE_TRUE_PEAK_DBFS", "LOUDNESS_DIRECTORY", "MIXED_DIRECTORY",
-    "SCORE_DUCK_DB", "SCORE_RAMP_SECONDS", "SCORE_MATCH_LOUDNESS", "SCORE_LIMIT",
-    "STRICT_MISSING", "BATCH_SIZE",
+    "SETTINGS",
+    "SETTINGS_SOURCES",
+    "BASE_DIRECTORY",
+    "SETTINGS_FILE",
+    "_RUN",
+    "_PATHS",
+    "_OUTPUT",
+    "_FILLERS",
+    "_SCORE",
+    "_LOUDNESS",
+    "_TTS",
+    "INPUT_DIRECTORY",
+    "IN_OUT_DIRECTORY",
+    "OUTPUT_DIRECTORY",
+    "CSV_FILE",
+    "OUT_DIRECTORY",
+    "HUMAN_GEN_DIRECTORY",
+    "MACHINE_GEN_DIRECTORY",
+    "WORK_DIRECTORY",
+    "LOG_DIRECTORY",
+    "MASTER_FILE",
+    "_SOURCE_DIRECTORIES",
+    "TTS_ENABLED",
+    "TTS_API_KEY_SOURCE",
+    "LANGUAGE_CODE",
+    "MODEL",
+    "PACE",
+    "SPEECH_SAMPLE_RATE",
+    "OUTPUT_AUDIO_CODEC",
+    "OVERWRITE_EXISTING",
+    "SHORT_FILLER",
+    "SHORT_FILLER_SECONDS",
+    "LONG_FILLER",
+    "LONG_FILLER_SECONDS",
+    "GENERATED_FILLERS",
+    "CONCAT_BACKEND",
+    "OUTPUT_FORMAT",
+    "TARGET_SAMPLE_RATE",
+    "TARGET_BITRATE",
+    "TARGET_MONO",
+    "FILLER_BITRATE",
+    "NORMALIZED_DIRECTORY",
+    "DIALOGUE_LOUDNESS",
+    "DIALOGUE_TARGET_LUFS",
+    "DIALOGUE_TRUE_PEAK_DBFS",
+    "LOUDNESS_DIRECTORY",
+    "MIXED_DIRECTORY",
+    "SCORE_DUCK_DB",
+    "SCORE_RAMP_SECONDS",
+    "SCORE_MATCH_LOUDNESS",
+    "SCORE_LIMIT",
+    "STRICT_MISSING",
+    "BATCH_SIZE",
 )
 
 
@@ -111,12 +149,11 @@ def configure(project=None):
     """
     Bind every setting below for one project folder.
 
-    `project` holds dialogues_new.csv, human_gen/, machine_gen/ and, if it
-    has one, dice-skit.json. Relative paths in that file are relative to the
-    project. None means the folder holding this code, which is what the
-    command-line scripts use.
+    `project` holds config.json and the configured CSV in input/. Relative
+    paths in config.json are relative to the project. None means the folder
+    holding this code, which is what the command-line scripts use.
 
-    Raises settings.SettingsError for an invalid dice-skit.json, leaving the
+    Raises settings.SettingsError for an invalid project config, leaving the
     previous configuration in place.
     """
     global SETTINGS, SETTINGS_SOURCES, BASE_DIRECTORY, SETTINGS_FILE
@@ -136,6 +173,17 @@ def configure(project=None):
 
     project = Path(project).resolve() if project else CODE_DIRECTORY
     settings_file = project / _settings.SETTINGS_FILE.name
+
+    if not settings_file.is_file():
+        legacy_settings = project / "dice-skit.json"
+        if legacy_settings.is_file():
+            raise _settings.SettingsError(
+                f"{legacy_settings.name} is deprecated; merge its settings "
+                "into config.json and add a top-level csv_file"
+            )
+        raise _settings.SettingsError(
+            f"{settings_file.name} is required in the project folder"
+        )
 
     # An old-layout project (everything at the top) is moved into input /
     # in-out / output on its first run, before its settings are read
@@ -164,7 +212,6 @@ def configure(project=None):
     _SCORE = SETTINGS["background_score"]
     _LOUDNESS = SETTINGS["loudness"]
     _TTS = SETTINGS["tts"]
-
 
     # The three top-level folders (doc section 14). Each may be relative to
     # the project or absolute.
@@ -200,7 +247,6 @@ def configure(project=None):
     LOG_DIRECTORY = _under(OUTPUT_DIRECTORY, _PATHS["log"])
 
     MASTER_FILE = OUT_DIRECTORY / _PATHS["master"]
-
 
     # ------------------------------------------------------------
     # Sarvam TTS settings
@@ -271,7 +317,6 @@ def configure(project=None):
     # Input formats and normalisation target
     # ------------------------------------------------------------
 
-
     # The one audio format every segment must share before it can be spliced.
     #
     # The default matches the Sarvam TTS output, which is the bulk of the
@@ -329,7 +374,6 @@ def configure(project=None):
     # Peak ceiling for the summed mix, as a linear fraction of full scale.
     SCORE_LIMIT = _SCORE["limit"]
 
-
     # What to do when an expected dialogue MP3 is missing, corrupt, or in a
     # mismatched audio format:
     #
@@ -367,7 +411,7 @@ def search_directories():
     The first directory holding a given sequence number wins outright, so a
     real recording is never displaced by synthesised speech however new the
     synthesised file is. Modification time only breaks ties within a single
-    directory. The order is paths.search_order in dice-skit.json.
+    directory. The order is paths.search_order in config.json.
 
     OUT_DIRECTORY is absent by design: it holds only the finished master.
     """
@@ -443,9 +487,7 @@ def start_run_log(name="run"):
 
     _log_handle = open(_log_path, "w", encoding="utf-8", newline="\n")
 
-    _log_handle.write(
-        f"{name} log - {datetime.now().isoformat(timespec='seconds')}\n"
-    )
+    _log_handle.write(f"{name} log - {datetime.now().isoformat(timespec='seconds')}\n")
     _log_handle.write(f"command: {' '.join(sys.argv)}\n")
     _log_handle.write("=" * 70 + "\n")
 
@@ -559,6 +601,7 @@ def close_run_log():
 # GENERAL HELPERS
 # ============================================================
 
+
 def run_command(command, description=None):
     """
     Run an audio tool command and raise a useful error if it fails.
@@ -577,9 +620,7 @@ def run_command(command, description=None):
         print(" ".join(str(x) for x in command))
         print()
         print(result.stderr)
-        raise RuntimeError(
-            f"Command failed with exit code {result.returncode}"
-        )
+        raise RuntimeError(f"Command failed with exit code {result.returncode}")
 
     return result
 
@@ -707,24 +748,94 @@ _SAMPLE_RATES = {
 # Bitrates in bits per second, indexed by the 4-bit bitrate index.
 # Index 0 is "free format" and index 15 is invalid; both are None here.
 _BITRATES_V1_L1 = (
-    None, 32, 64, 96, 128, 160, 192, 224,
-    256, 288, 320, 352, 384, 416, 448, None,
+    None,
+    32,
+    64,
+    96,
+    128,
+    160,
+    192,
+    224,
+    256,
+    288,
+    320,
+    352,
+    384,
+    416,
+    448,
+    None,
 )
 _BITRATES_V1_L2 = (
-    None, 32, 48, 56, 64, 80, 96, 112,
-    128, 160, 192, 224, 256, 320, 384, None,
+    None,
+    32,
+    48,
+    56,
+    64,
+    80,
+    96,
+    112,
+    128,
+    160,
+    192,
+    224,
+    256,
+    320,
+    384,
+    None,
 )
 _BITRATES_V1_L3 = (
-    None, 32, 40, 48, 56, 64, 80, 96,
-    112, 128, 160, 192, 224, 256, 320, None,
+    None,
+    32,
+    40,
+    48,
+    56,
+    64,
+    80,
+    96,
+    112,
+    128,
+    160,
+    192,
+    224,
+    256,
+    320,
+    None,
 )
 _BITRATES_V2_L1 = (
-    None, 32, 48, 56, 64, 80, 96, 112,
-    128, 144, 160, 176, 192, 224, 256, None,
+    None,
+    32,
+    48,
+    56,
+    64,
+    80,
+    96,
+    112,
+    128,
+    144,
+    160,
+    176,
+    192,
+    224,
+    256,
+    None,
 )
 _BITRATES_V2_L23 = (
-    None, 8, 16, 24, 32, 40, 48, 56,
-    64, 80, 96, 112, 128, 144, 160, None,
+    None,
+    8,
+    16,
+    24,
+    32,
+    40,
+    48,
+    56,
+    64,
+    80,
+    96,
+    112,
+    128,
+    144,
+    160,
+    None,
 )
 
 _BITRATE_TABLE = {
@@ -756,17 +867,17 @@ _SIDE_INFO_SIZE = {
 FrameHeader = namedtuple(
     "FrameHeader",
     [
-        "raw",                # the 4 header bytes, reused when synthesising frames
-        "version",            # "1" | "2" | "2.5"
-        "layer",              # 1 | 2 | 3
-        "bitrate",            # bits per second
-        "sample_rate",        # Hz
-        "channel_mode",       # 2-bit field; CHANNEL_MODE_MONO == mono
-        "protected",          # True when a 16-bit CRC follows the header
-        "padded",             # True when this frame carries a padding slot
-        "frame_length",       # total frame size in bytes, padding included
+        "raw",  # the 4 header bytes, reused when synthesising frames
+        "version",  # "1" | "2" | "2.5"
+        "layer",  # 1 | 2 | 3
+        "bitrate",  # bits per second
+        "sample_rate",  # Hz
+        "channel_mode",  # 2-bit field; CHANNEL_MODE_MONO == mono
+        "protected",  # True when a 16-bit CRC follows the header
+        "padded",  # True when this frame carries a padding slot
+        "frame_length",  # total frame size in bytes, padding included
         "samples_per_frame",
-        "side_info_size",     # Layer III side info length, 0 for other layers
+        "side_info_size",  # Layer III side info length, 0 for other layers
     ],
 )
 
@@ -788,7 +899,7 @@ def parse_frame_header(data, offset=0):
     if offset + 4 > len(data):
         return None
 
-    b0, b1, b2, b3 = data[offset:offset + 4]
+    b0, b1, b2, b3 = data[offset : offset + 4]
 
     # 11-bit frame sync.
     if b0 != 0xFF or (b1 & 0xE0) != 0xE0:
@@ -848,7 +959,7 @@ def parse_frame_header(data, offset=0):
         side_info_size = _SIDE_INFO_SIZE[(version, is_mono)]
 
     return FrameHeader(
-        raw=bytes(data[offset:offset + 4]),
+        raw=bytes(data[offset : offset + 4]),
         version=version,
         layer=layer,
         bitrate=bitrate,
@@ -910,11 +1021,8 @@ def strip_tags(data):
     end = len(data)
 
     # ID3v2: "ID3", version (2 bytes), flags (1 byte), syncsafe size (4 bytes).
-    while (
-        end - start >= 10
-        and data[start:start + 3] == b"ID3"
-    ):
-        size_bytes = data[start + 6:start + 10]
+    while end - start >= 10 and data[start : start + 3] == b"ID3":
+        size_bytes = data[start + 6 : start + 10]
 
         # Syncsafe integer: 7 significant bits per byte.
         size = 0
@@ -935,7 +1043,7 @@ def strip_tags(data):
             return end, end
 
     # ID3v1: fixed 128-byte trailer beginning with "TAG".
-    if end - start >= 128 and data[end - 128:end - 125] == b"TAG":
+    if end - start >= 128 and data[end - 128 : end - 125] == b"TAG":
         end -= 128
 
     return start, end
@@ -1042,12 +1150,12 @@ def find_xing_offset(data, offset, header):
 
     vbri_at = offset + 4 + 32
 
-    if vbri_at + 4 <= frame_end and data[vbri_at:vbri_at + 4] == b"VBRI":
+    if vbri_at + 4 <= frame_end and data[vbri_at : vbri_at + 4] == b"VBRI":
         return vbri_at
 
     tag_at = offset + 4 + (2 if header.protected else 0) + header.side_info_size
 
-    if tag_at + 4 <= frame_end and data[tag_at:tag_at + 4] in (b"Xing", b"Info"):
+    if tag_at + 4 <= frame_end and data[tag_at : tag_at + 4] in (b"Xing", b"Info"):
         return tag_at
 
     return None
@@ -1092,18 +1200,18 @@ def build_info_frame(header, frame_count, total_bytes, frame_offsets=None):
     cursor = 4 + (2 if header.protected else 0) + header.side_info_size
 
     # "Info" rather than "Xing" signals a constant-bitrate stream.
-    frame[cursor:cursor + 4] = b"Info"
+    frame[cursor : cursor + 4] = b"Info"
     cursor += 4
 
     flags = XING_FRAMES_FLAG | XING_BYTES_FLAG | XING_TOC_FLAG
 
-    frame[cursor:cursor + 4] = flags.to_bytes(4, "big")
+    frame[cursor : cursor + 4] = flags.to_bytes(4, "big")
     cursor += 4
 
-    frame[cursor:cursor + 4] = frame_count.to_bytes(4, "big")
+    frame[cursor : cursor + 4] = frame_count.to_bytes(4, "big")
     cursor += 4
 
-    frame[cursor:cursor + 4] = total_bytes.to_bytes(4, "big")
+    frame[cursor : cursor + 4] = total_bytes.to_bytes(4, "big")
     cursor += 4
 
     if cursor + XING_TOC_ENTRIES > header.frame_length:
@@ -1144,9 +1252,7 @@ def build_silence_frame(header):
     audio without FFmpeg's `anullsrc`.
     """
     if header.layer != 3:
-        raise Mp3FormatError(
-            "Silence synthesis is only implemented for Layer III."
-        )
+        raise Mp3FormatError("Silence synthesis is only implemented for Layer III.")
 
     frame = bytearray(header.frame_length)
 
@@ -1202,6 +1308,7 @@ def reference_frame_header(sample_rate=None, bitrate=None, mono=True):
 # ============================================================
 # VALIDATION
 # ============================================================
+
 
 def is_valid_audio(filename, verbose=True):
     """
@@ -1295,9 +1402,7 @@ def is_valid_mp3_native(filename, verbose=True, min_frames=2):
     if verbose:
         print()
         print(f"INVALID MP3: {filename}")
-        print(
-            f"Found {seen} usable MPEG frame(s); need at least {min_frames}."
-        )
+        print(f"Found {seen} usable MPEG frame(s); need at least {min_frames}.")
         print()
 
     return False
@@ -1456,9 +1561,7 @@ def load_csv(csv_file=None, row_limit=None):
     csv_file = Path(csv_file) if csv_file else CSV_FILE
 
     if not csv_file.exists():
-        raise FileNotFoundError(
-            f"CSV file not found: {csv_file}"
-        )
+        raise FileNotFoundError(f"CSV file not found: {csv_file}")
 
     records = []
 
@@ -1472,9 +1575,7 @@ def load_csv(csv_file=None, row_limit=None):
         reader = csv.DictReader(f)
 
         if not reader.fieldnames:
-            raise RuntimeError(
-                f"{csv_file.name} has no header row."
-            )
+            raise RuntimeError(f"{csv_file.name} has no header row.")
 
         fieldnames = set(reader.fieldnames)
 
@@ -1482,8 +1583,7 @@ def load_csv(csv_file=None, row_limit=None):
 
         if missing:
             raise RuntimeError(
-                f"{csv_file.name} is missing columns: "
-                + ", ".join(sorted(missing))
+                f"{csv_file.name} is missing columns: " + ", ".join(sorted(missing))
             )
 
         speaker_column = next(
@@ -1500,50 +1600,32 @@ def load_csv(csv_file=None, row_limit=None):
 
         for row_number, row in enumerate(reader, start=2):
 
-            sequence_number = str(
-                row.get("sequence_number") or ""
-            ).strip()
+            sequence_number = str(row.get("sequence_number") or "").strip()
 
-            character_name = str(
-                row.get("character_name") or ""
-            ).strip()
+            character_name = str(row.get("character_name") or "").strip()
 
-            dialogue_text = str(
-                row.get("dialogue_text") or ""
-            ).strip()
+            dialogue_text = str(row.get("dialogue_text") or "").strip()
 
             speaker = None
 
             if speaker_column:
                 speaker = str(row.get(speaker_column) or "").strip() or None
 
-            filler_before = (
-                str(row.get(FILLER_COLUMN) or "").strip() or None
-            )
+            filler_before = str(row.get(FILLER_COLUMN) or "").strip() or None
 
-            filler_after = (
-                str(row.get(FILLER_AFTER_COLUMN) or "").strip() or None
-            )
+            filler_after = str(row.get(FILLER_AFTER_COLUMN) or "").strip() or None
 
-            background_score = (
-                str(row.get(SCORE_COLUMN) or "").strip() or None
-            )
+            background_score = str(row.get(SCORE_COLUMN) or "").strip() or None
 
-            score_cues = (
-                str(row.get(SCORE_CUES_COLUMN) or "").strip() or None
-            )
+            score_cues = str(row.get(SCORE_CUES_COLUMN) or "").strip() or None
 
             if not sequence_number:
-                print(
-                    f"WARNING: Row {row_number} has no "
-                    "sequence_number. Skipping."
-                )
+                print(f"WARNING: Row {row_number} has no " "sequence_number. Skipping.")
                 continue
 
             if not dialogue_text:
                 print(
-                    f"WARNING: Row {row_number} has empty "
-                    "dialogue_text. Skipping."
+                    f"WARNING: Row {row_number} has empty " "dialogue_text. Skipping."
                 )
                 continue
 
@@ -1698,7 +1780,7 @@ def character_token(path):
     match = _SEQUENCE_PATTERN.match(stem)
 
     if match:
-        stem = stem[match.end():]
+        stem = stem[match.end() :]
 
     return normalize_character(stem)
 
@@ -1877,7 +1959,6 @@ def needs_normalizing(path, target=None):
     return True
 
 
-
 USAGE = """\
 Usage:
     python stitch_mp3.py [ROWS] [strict=0|1] [dry_run=0|1] [loudness=0|1]
@@ -1899,9 +1980,9 @@ Usage:
 
     loudness=0  leave every line at its recorded level for this run, e.g. to
                 compare before and after. The default, 1, brings each line
-                to loudness.target_lufs in dice-skit.json.
+                to loudness.target_lufs in config.json.
 
-    Defaults for strict and loudness come from dice-skit.json; see
+    Defaults for strict and loudness come from config.json; see
     python settings.py.
 
     Three checks abort regardless of strict: dialogues_new.csv missing, a
@@ -2010,10 +2091,7 @@ def parse_arguments(argv, strict_default=None):
             sys.exit(1)
 
         if candidate <= 0:
-            print(
-                f"ERROR: row limit must be a positive integer, got "
-                f"{candidate}."
-            )
+            print(f"ERROR: row limit must be a positive integer, got " f"{candidate}.")
             print()
             print(USAGE)
             sys.exit(1)

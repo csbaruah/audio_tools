@@ -28,7 +28,7 @@ How to re-enable it
 3. Uncomment the four blocks below, each marked with a
    "--- UNCOMMENT TO ENABLE ---" banner.
 
-4. Set "tts": {"enabled": true} in dice-skit.json.
+4. Set "tts": {"enabled": true} in config.json.
 
 5. Run:
 
@@ -47,7 +47,7 @@ import sys
 import audio_common as common
 
 
-# Master switch: tts.enabled in dice-skit.json. Turn it on only after
+# Master switch: tts.enabled in config.json. Turn it on only after
 # uncommenting the blocks below.
 TTS_ENABLED = common.TTS_ENABLED
 
@@ -73,7 +73,7 @@ TTS_ENABLED = common.TTS_ENABLED
 # ENV_FILE = common.BASE_DIRECTORY / ".env"
 # load_dotenv(ENV_FILE)
 #
-# # The key is never in dice-skit.json; tts.api_key_source says where it is.
+# # The key is never in config.json; tts.api_key_source says where it is.
 # if common.TTS_API_KEY_SOURCE == "keyring":
 #     import keyring
 #     API_KEY = keyring.get_password("dice-skit", "SARVAM_API_KEY")
@@ -316,7 +316,7 @@ def main():
         print(f"    2. create {common.BASE_DIRECTORY / '.env'} with")
         print("       SARVAM_API_KEY=your_actual_api_key")
         print("    3. uncomment the four marked blocks in generate_mp3.py")
-        print('    4. set "tts": {"enabled": true} in dice-skit.json')
+        print('    4. set "tts": {"enabled": true} in config.json')
         print()
         print("To stitch the existing MP3s instead:")
         print("    python stitch_mp3.py")

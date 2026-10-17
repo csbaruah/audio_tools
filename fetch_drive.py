@@ -60,10 +60,10 @@ from concat_backends import atomic_install, temp_path_for
 # ============================================================
 
 # Optional default so the URL need not be pasted every run: drive.folder_url
-# in dice-skit.json.
+# in config.json.
 DRIVE_FOLDER_URL = common.SETTINGS["drive"]["folder_url"]
 
-# Anonymous access by default: drive.use_cookies in dice-skit.json. Set
+# Anonymous access by default: drive.use_cookies in config.json. Set
 # cookies=1 on the command line to fall back to your browser session if Google
 # starts throttling bulk anonymous downloads.
 USE_COOKIES = common.SETTINGS["drive"]["use_cookies"]
@@ -74,7 +74,7 @@ Usage:
     python fetch_drive.py [FOLDER_URL] [dry=1] [overwrite=1] [limit=N] [cookies=1]
 
     FOLDER_URL   a Google Drive folder link or bare folder ID. Optional if
-                 drive.folder_url is set in dice-skit.json.
+                 drive.folder_url is set in config.json.
 
     dry=1        list what would be fetched, download nothing
     overwrite=1  download even when the file is already present locally

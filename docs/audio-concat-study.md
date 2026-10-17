@@ -19,7 +19,7 @@ machine; the rest of the document is the study itself. Section 9 covers the
 take-ID rules and the mandatory pre-flight checks that keep recordings attached
 to the right lines when the script is revised. Section 10 covers mixing a
 background score under a line, section 11 evening out loudness across lines,
-and section 12 the settings file, dice-skit.json. Section 13 proposes, but
+and section 12 the settings file, config.json. Section 13 proposes, but
 does not yet implement, a graphical interface for Windows, Android, iOS and
 the web. Section 14 describes the input / in-out / output folder layout and
 the clean command. Section 15 records the longer-term hybrid product
@@ -152,7 +152,7 @@ Copy the whole `dice-skit` folder, or at minimum:
 ```
 dice-skit/
   *.py                    the scripts and modules
-  dice-skit.json          settings
+  config.json          settings
   input/
     dialogues_new.csv     the running order, fillers and background scores
   docs/
@@ -414,7 +414,7 @@ Select-String -Path log\run*.log -Pattern '^WARNING: (character mismatch|no char
 
 | Symptom | Cause and fix |
 |---|---|
-| `ERROR in settings: dice-skit.json: ...` | The settings file has a typo, a wrong type or an out-of-range value; the message names the key. Fix it, or delete the key to use its default. Nothing was built. See §12. |
+| `ERROR in settings: config.json: ...` | The settings file has a typo, a wrong type or an out-of-range value; the message names the key. Fix it, or delete the key to use its default. Nothing was built. See §12. |
 | `PEAK-LIMITED` | Quiet lines were raised to the loudness target and their loudest peaks were held at the ceiling. Normal for speech. To limit less, lower `loudness.target_lufs`, e.g. to −21 (§11.4). |
 | `ALREADY CLIPPED` | The source file is distorted. Leveling cannot repair it; re-record or regenerate that line. |
 | `ffmpeg: command not found` after installing | Terminal predates the PATH change. Restart the terminal, or VS Code entirely. |
@@ -434,7 +434,7 @@ Select-String -Path log\run*.log -Pattern '^WARNING: (character mismatch|no char
 | Files placed in `output\master\` are ignored | By design — it is output only. Put source audio in `input\human_gen\` or `in-out\machine_gen\`. |
 | `MOVING TO THE NEW FOLDER LAYOUT (one time)` | Normal, once, on a project from before 2026-10-08. Folders are moved, not copied (§14.4). |
 | `cannot move to the new folder layout ...` | A destination already exists, or a file was in use. Nothing was moved. Close the file (often `dialogues_new.csv` in Excel) or resolve the named folder, and run again. |
-| `FORMAT MISMATCH` after normalization | A transcode did not land on the target. Check `output.sample_rate` / `output.bitrate` in `dice-skit.json`. |
+| `FORMAT MISMATCH` after normalization | A transcode did not land on the target. Check `output.sample_rate` / `output.bitrate` in `config.json`. |
 | `NAMED FILLER NOT FOUND` | A `filler_before` file is absent from both directories. It falls back to silence under `strict=0`. |
 | `BACKGROUND SCORE FAILED` | A row's score was not applied, so its plain dialogue was used. The block names the cause: background not found, malformed `score_cues`, only one of the two columns set, or FFmpeg missing. An ordinary problem: `strict=1` aborts, `strict=0` continues. See §10.7. |
 | `CUE STRING LONGER THAN THE AUDIO` | The mix was made, but a cue outlasted the audio. The other track came back to full volume (§10.7). Shorten that row's durations. |
@@ -860,7 +860,7 @@ It was deleted on 2026-10-05, for these reasons:
 | Unused | Nothing imported or called it. The only references were two mentions in this document. |
 | Broken | It did not compile: a stray non-breaking space (U+00A0) on line 59 raised `SyntaxError`. It had not run since the split. |
 | Superseded | Every part of it now lives elsewhere: generation in `generate_mp3.py`, joining in `concat_backends.py`, and every check, filler, mix and loudness feature added since in `stitch_mp3.py` and its modules. |
-| Misleading | It kept its own copies of settings (`LANGUAGE_CODE`, `MODEL`, `PACE`, `SPEECH_SAMPLE_RATE`, `OVERWRITE_EXISTING`). They no longer matched `dice-skit.json` (§12), so they could mislead anyone who read it. |
+| Misleading | It kept its own copies of settings (`LANGUAGE_CODE`, `MODEL`, `PACE`, `SPEECH_SAMPLE_RATE`, `OVERWRITE_EXISTING`). They no longer matched `config.json` (§12), so they could mislead anyone who read it. |
 | Known faulty | It joined the 22 050 Hz intro onto 24 000 Hz dialogue by stream copy, producing the mis-timed masters described in §6. |
 
 **Recovery.** It is still available: every snapshot from `backup/v2/` to
@@ -1777,7 +1777,7 @@ Rules:
 
 | Property | Decision |
 |---|---|
-| "Faded" | **Quieter, never silent.** The turned-down track must still be faintly audible. `background_score.duck_db` in `dice-skit.json`, default −14. Tune by ear. |
+| "Faded" | **Quieter, never silent.** The turned-down track must still be faintly audible. `background_score.duck_db` in `config.json`, default −14. Tune by ear. |
 | Switch | A short linear ramp at every boundary, `SCORE_RAMP_SECONDS = 0.3`, so there are no hard volume steps |
 | Length | Staggered: `max(first track, delay + second track)`, where delay is the solo segment. Together: `max(main, background)`, because there is no delay. Either way the longer file plays to its end. |
 | Trimming | **None**, except with `t-m-loop`. Long music under a short line plays to its full length and is not trimmed when the dialogue ends. With `-loop`, a *short* background is repeated, and the last repeat is cut at the line's end. With exactly `t-m-loop`, a *long* background is also cut at the line's end, with a 0.3 s fade-out. |
@@ -1900,7 +1900,7 @@ reduction of peaks. The dialogue-led stretch matched the dialogue's own level.
 
 > **Proposed and implemented 2026-10-05.** The code is in `loudness.py`.
 > `stitch_mp3.py` calls it from `apply_loudness()`, and the settings are the
-> `loudness` section of `dice-skit.json` (§12). It is on by default;
+> `loudness` section of `config.json` (§12). It is on by default;
 > `loudness=0` on the command line turns it off for one run. §11.7 records
 > the measured result. §11.1 and §11.2 describe the pipeline before this
 > stage existed.
@@ -2033,10 +2033,10 @@ exactly these 8 lines by these amounts (§11.7).
 
 | # | Decision | As built |
 |---|---|---|
-| 1 | Target level | −19 LUFS, the proposed default. Change `loudness.target_lufs` in `dice-skit.json` (−31 to −10). |
+| 1 | Target level | −19 LUFS, the proposed default. Change `loudness.target_lufs` in `config.json` (−31 to −10). |
 | 2 | Leave fillers, sound effects and background scores at their own levels? | Yes, dialogue only, always. The proposed `dialogue_only` setting was dropped: its only other value would raise the dice sound to speech level, which nobody wants. |
 | 3 | Per-row override column, e.g. `gain_db` | **Not built.** Add it when a deliberately quiet line first needs it. |
-| 4 | Can the stage be switched off? | Yes: `loudness.enabled` in `dice-skit.json`, and `loudness=0` / `loudness=1` on the command line, which wins for one run |
+| 4 | Can the stage be switched off? | Yes: `loudness.enabled` in `config.json`, and `loudness=0` / `loudness=1` on the command line, which wins for one run |
 
 ### 11.7 Verification (measured, 2026-10-05)
 
@@ -2071,7 +2071,7 @@ column above. The cost is one extra encode per line, paid once and then cached.
 
 | Run | Outcome |
 |---|---|
-| `loudness=0`, no `dice-skit.json` | the same 15-dialogue, 31-segment, 3:32.899 master as before §11 |
+| `loudness=0`, no `config.json` | the same 15-dialogue, 31-segment, 3:32.899 master as before §11 |
 | Default | 15 lines adjusted; master 3:33.331, since re-encoding adds MP3 padding to each line |
 | Second run | `adjusted : 0`, `from cache: 15` |
 | A row with a background score | the mix used the leveled line; the music was matched by −4.7 dB, exactly −19.0 minus the music's −14.3 LUFS |
@@ -2085,7 +2085,7 @@ log under `LOUDNESS PER LINE`, so the console stays readable at 154 rows.
 ## 12. Settings in a JSON file (implemented)
 
 > **Proposed and implemented 2026-10-05.** The loader is `settings.py`, and
-> `dice-skit.json` sits beside the scripts, fully commented and holding the
+> `config.json` sits beside the scripts, fully commented and holding the
 > defaults. `audio_common.py` still exposes the same constant names, now
 > filled from the settings, so no other code changed how it reads them.
 > §12.10 records how it was verified.
@@ -2098,7 +2098,7 @@ a future GUI nothing to read or write.
 
 ### 12.2 One settings file
 
-A single file, `dice-skit.json`, beside the scripts. It holds only the values a
+A single file, `config.json`, beside the scripts. It holds only the values a
 user would change. The Python code keeps the built-in defaults and checks every
 value when the file is loaded.
 
@@ -2244,7 +2244,7 @@ out, and `dice-skit` has no `.env` today.
 
 ### 12.8 Sample file with defaults
 
-This is the shipped `dice-skit.json`. Every value is the built-in default, and
+This is the shipped `config.json`. Every value is the built-in default, and
 keys starting with `_` are the comments of §12.3. The block is generated from
 `settings.SPEC` by `python settings.py write`, so it always matches the code.
 
@@ -2385,16 +2385,16 @@ keys starting with `_` are the comments of §12.3. The block is generated from
 
 | # | Decision | As built |
 |---|---|---|
-| 1 | File name and location | `dice-skit.json` beside the scripts |
+| 1 | File name and location | `config.json` beside the scripts |
 | 2 | Comment style | `_`-prefixed keys (§12.3) |
 | 3 | Where the API key comes from | `tts.api_key_source`, `"env"` by default. `generate_mp3.py`'s commented-out key loading now reads it and handles `"keyring"` too, ready for when TTS is enabled. |
-| 4 | Ship the full sample, or an empty file with only `version` | The full sample |
+| 4 | Ship the full sample, or an empty file with `version` and `csv_file` | The full sample |
 
 Using it:
 
 ```powershell
 python settings.py           # list every setting, its value, and where it came from
-python settings.py write     # create or refresh dice-skit.json with full comments
+python settings.py write     # create or refresh config.json with full comments
 ```
 
 `write` keeps the current values and any `_` comments already in the file,
@@ -2403,9 +2403,9 @@ and a rename. A GUI would call `settings.load()`, `settings.document()` and
 `settings.write()`, and read limits and choices from `settings.SPEC`.
 
 Every run's log has a `SETTINGS` block listing each value and its source
-(`default` or `dice-skit.json`), followed by the command-line flags in force.
-The console shows `Settings : dice-skit.json found` or `not found; built-in
-defaults`.
+(`default` or `config.json`), followed by the command-line flags in force.
+Project runs require config.json. Missing settings inside it use their built-in
+defaults; a missing file is an error before audio is touched.
 
 Two smaller changes from the proposal:
 
@@ -2417,12 +2417,12 @@ Two smaller changes from the proposal:
 
 | Test | Result |
 |---|---|
-| No `dice-skit.json` | every value is the default; the master is unchanged |
-| The shipped `dice-skit.json` | every source reads `dice-skit.json`; values identical to the defaults |
+| No `config.json` | project run is rejected before audio is touched |
+| The shipped `config.json` | every source reads `config.json`; values identical to the defaults |
 | `_` comments and overrides together | comments ignored; `strict false`, `short_seconds 1.5`, `target_lufs -21` applied |
 | Typo `duck_bd` | `unknown setting "background_score.duck_bd". Known in "background_score": duck_db, …` |
 | Section typo `loudnes` | `unknown section "loudnes". Known sections: run, paths, …` |
-| `"strict": "no"` | `dice-skit.json: run.strict must be true or false, got 'no'` |
+| `"strict": "no"` | `config.json: run.strict must be true or false, got 'no'` |
 | `target_lufs: -5` | `must be at most -10` |
 | `"backend": "sox"` | `must be one of auto, ffmpeg, python` |
 | Two `_comment` keys in one section | `key "_comment" appears twice in the same section` |
@@ -2631,7 +2631,7 @@ different packaging of the same code, not a rewrite.
 | **No shell.** External programs run only through `subprocess.run([list])` with `shell=False`. The code already does this everywhere: there are no `shell=True` uses. | User text (file names, cue strings) can never become a command. |
 | **FFmpeg is bundled and found by its own path,** not through `PATH`. | Prevents a different `ffmpeg.exe` placed earlier on `PATH` from being run instead. |
 | **Files only inside the chosen project folder.** Every CSV-supplied filename (fillers, background scores) is resolved and checked to stay inside the project's folders. | A CSV cell such as `..\..\Windows\...` cannot read or overwrite files elsewhere. |
-| **The API key never leaves the OS vault.** The GUI writes it to Windows Credential Manager or the iOS/Android Keychain/Keystore (`api_key_source: "keyring"`, §12.7). It is never displayed again, never logged, and never written to `dice-skit.json`. | Settings files and logs get shared; the vault does not. |
+| **The API key never leaves the OS vault.** The GUI writes it to Windows Credential Manager or the iOS/Android Keychain/Keystore (`api_key_source: "keyring"`, §12.7). It is never displayed again, never logged, and never written to `config.json`. | Settings files and logs get shared; the vault does not. |
 | **Least privilege.** No administrator rights on Windows. On phones, only file-picker access, plus network access for Drive or TTS. | Nothing more is requested than the features need. |
 | **Signed packages.** | Users can verify where the app came from; tampering breaks the signature. |
 | **No telemetry, no auto-update that downloads code.** Updates come only through the installer or the app stores. | Required on iOS by Guideline 2.5.2, and it removes a channel through which code could be swapped. |
@@ -2644,7 +2644,7 @@ What an attacker could reach, and how each is kept small:
 | Entry point | Exposure | Control |
 |---|---|---|
 | Network | Only outbound calls the user starts: Google Drive (`fetch_drive.py`) and Sarvam TTS. Both are HTTPS, with certificates verified (truststore, §0.5). | No inbound connections on devices. On a server: HTTPS only, authentication on every request. |
-| Files the user opens | CSV, `dice-skit.json`, audio files | Existing strict validation in `settings.py` and `load_csv()`. FFmpeg parses the audio; keeping its build current is the main ongoing task. |
+| Files the user opens | CSV, `config.json`, audio files | Existing strict validation in `settings.py` and `load_csv()`. FFmpeg parses the audio; keeping its build current is the main ongoing task. |
 | Bundled code | Python, Flet, FFmpeg and Python packages | Pinned versions, a short dependency list, and a periodic check for security advisories |
 | Extensibility | New screens and features | Built into the app at compile time. **No plugin loading** at run time. |
 
@@ -2696,7 +2696,7 @@ phone apps exist.
 
 > **Proposed, decided and implemented 2026-10-08.** The code is in
 > `layout.py` (migration and `clean`) and `audio_common.configure()` (the
-> paths). The settings are under `paths` in `dice-skit.json`. The real project
+> paths). The settings are under `paths` in `config.json`. The real project
 > was migrated on 2026-10-08 and verified (§14.6).
 
 ### 14.1 The problem
@@ -2719,11 +2719,11 @@ dice-skit\
     master\                    master_dialogues.mp3
     work\                      caches and generated silence
     log\                       one log per run
-  dice-skit.json               settings, beside the scripts
+  config.json               settings, beside the scripts
   *.py, docs\, gui\            code and documentation
 ```
 
-`dice-skit.json` stays beside the scripts. It is how the pipeline finds every
+`config.json` stays beside the scripts. It is how the pipeline finds every
 other folder, so it cannot live inside one of them.
 
 ### 14.3 Settings
@@ -2733,7 +2733,7 @@ other folder, so it cannot live inside one of them.
 | `paths.input` | `input` | the project folder (or absolute) |
 | `paths.in_out` | `in-out` | the project folder (or absolute) |
 | `paths.output` | `output` | the project folder (or absolute) |
-| `paths.csv` | `dialogues_new.csv` | `input` |
+| `csv_file` | `dialogues_new.csv` | configured input folder |
 | `paths.human_gen` | `human_gen` | `input` |
 | `paths.machine_gen` | `machine_gen` | `in_out` |
 | `paths.master_dir` | `master` | `output` |
@@ -2760,7 +2760,7 @@ the user's recordings, it is deliberately conservative:
 | **Moves, never copies or deletes** | Nothing is duplicated or lost |
 | **Checks every destination first.** If any already exists, it moves nothing and says which. | A project is never half-moved |
 | **Rolls back on failure.** If one move fails, everything already moved is put back, and any empty folders it created are removed. | The next run sees the old layout and tries again |
-| **Updates `dice-skit.json` only after every move succeeded.** Paths left at the old defaults switch to the new ones; a path the user had changed is kept. | Settings never point at folders that don't exist |
+| **Updates `config.json` only after every move succeeded.** Paths left at the old defaults switch to the new ones; a path the user had changed is kept. | Settings never point at folders that don't exist |
 | **Lists every move** on the console and in `output\log\migrate<timestamp>.log` | An audit trail |
 
 It detects an old project by its top-level folders (`human_gen`,
@@ -2819,7 +2819,7 @@ On the real project:
 | Test | Result |
 |---|---|
 | First attempt, with `dialogues_new.csv` open elsewhere | Failed safely and rolled back; project unchanged |
-| Second attempt, file closed | 6 items moved, `dice-skit.json` updated; all 79 files identical to a safety copy taken first |
+| Second attempt, file closed | 6 items moved, `config.json` updated; all 79 files identical to a safety copy taken first |
 | `strict=0` build in the new layout | Exit 0; master byte-identical to the one built just before the move |
 | Backup hook | Now covers `input\dialogues_new.csv` and `gui\`; no audio and nothing from `output\` |
 
@@ -2914,9 +2914,9 @@ output\release\
     [DLLs required by the selected FFmpeg build, if any]
     [applicable FFmpeg license and notices]
   sample_project\
-    dice-skit.json
+    config.json
     input\
-      dialogues_new.csv
+      dialogues.csv
       human_gen\
         [three selected dialogue MP3s and every referenced audio asset]
     in-out\
@@ -2940,6 +2940,11 @@ asset referenced by those rows is included in the sample project's
 `human_gen` folder. The cue strings were validated by a sample dry run. Before
 public distribution, listen to the generated master as well. The bundled README
 explains how to run the sample or pass another project folder to the executable.
+
+Each project has one root `config.json` holding both pipeline settings and a
+top-level `csv_file` filename, such as `{"csv_file": "dialogues.csv"}`. The
+named CSV is read from the configured input folder. The deprecated
+`dice-skit.json` file is no longer used; merge its settings into `config.json`.
 
 The executable takes the project folder as its first argument and forwards
 remaining arguments to the existing stitch command. The launcher configures

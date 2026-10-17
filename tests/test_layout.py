@@ -19,9 +19,10 @@ def _old_project(project):
     (project / "work" / "cache.tmp").write_bytes(b"cache")
     (project / "log").mkdir()
     (project / "log" / "run.log").write_text("log")
-    (project / "dice-skit.json").write_text(
+    (project / "config.json").write_text(
         json.dumps(
             {
+                "csv_file": "dialogues_new.csv",
                 "paths": {
                     "csv": "dialogues_new.csv",
                     "human_gen": "human_gen",
@@ -54,13 +55,25 @@ def test_migrate_moves_old_layout_and_preserves_custom_settings(tmp_path):
     assert (tmp_path / "output" / "log" / "run.log").read_text() == "log"
     assert not (tmp_path / "human_gen").exists()
 
-    rewritten = json.loads((tmp_path / "dice-skit.json").read_text())
+    rewritten = json.loads((tmp_path / "config.json").read_text())
     assert rewritten["run"]["strict"] is False
     assert rewritten["paths"]["input"] == "input"
     assert rewritten["paths"]["in_out"] == "in-out"
     assert rewritten["paths"]["output"] == "output"
 
     assert layout.migrate(tmp_path, say=lambda *_: None) == []
+
+
+def test_migrate_uses_csv_filename_from_project_config(tmp_path):
+    _old_project(tmp_path)
+    (tmp_path / "dialogues_new.csv").rename(tmp_path / "dialogues.csv")
+    (tmp_path / "config.json").write_text(json.dumps({"csv_file": "dialogues.csv"}))
+
+    moves = layout.migrate(tmp_path, say=lambda *_: None)
+
+    assert (tmp_path / "input" / "dialogues.csv").is_file()
+    assert not (tmp_path / "input" / "dialogues_new.csv").exists()
+    assert len(moves) == 6
 
 
 def test_migrate_refuses_destination_collision_without_moving_anything(tmp_path):
