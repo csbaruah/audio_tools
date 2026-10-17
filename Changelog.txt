@@ -6,6 +6,17 @@ Sep 11 entries are UTC). Section numbers (sec.) refer to
 docs\audio-concat-study.md.
 
 
+2026-10-17  Make targets for test, Windows release and cleanup
+    Added make test; make release-windows runs tests before packaging (make
+    release is an alias); make clean removes only output\release\. make android
+    clearly reports that a framework must be selected before APK builds.
+
+2026-10-17  Windows console release prototype (sec. 16)
+    Added a Makefile-driven builder for output\release\modaud.exe. It accepts a
+    project folder and existing stitch options, bundles FFmpeg/FFprobe, and
+    includes a three-line sample. The packaged sample built a 190.2-second
+    master successfully.
+
 2026-10-12  Automated tests and pull-request checks
     Added fixture-based tests for folder migration, settings and CSV pre-flight
     validation. GitHub Actions runs the suite and checks test formatting for

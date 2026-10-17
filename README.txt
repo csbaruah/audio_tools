@@ -81,6 +81,8 @@ CONTENTS
       fetch_drive.py    downloads recordings from a shared Google Drive folder
       generate_mp3.py   generates missing lines with Sarvam TTS
                         (switched off by default)
+      modaud.exe        Windows console release; stitches a project folder
+                        passed on the command line
 
 
 ------------------------------------------------------------------------------
@@ -99,6 +101,8 @@ proxy problems and other details.
   gdown, truststore        fetch_drive.py                   only to download
                                                             from Google Drive
   sarvamai, python-dotenv  generate_mp3.py                  only for TTS
+  GNU Make, PyInstaller,   building modaud.exe              only to build release
+  pytest, Black
 
 Without FFmpeg the tool can still join MP3s that are already in the target
 format, but it can't level loudness or convert other formats.
@@ -148,8 +152,40 @@ Step 5 - Tests and formatting checks (contributors)
       python -m pytest -q
       python -m black --check tests
 
+      With GNU Make installed, "make test" runs both checks.
+
   GitHub Actions runs these checks on pull requests to main and pushes to
   main. The tests use temporary fixtures; they do not need the audio library.
+
+Step 6 - Build the Windows console release (optional)
+
+  Install GNU Make and the release-build and test packages:
+
+      python -m pip install -r requirements-dev.txt -r requirements-build.txt
+
+  Make sure both ffmpeg.exe and ffprobe.exe are on PATH, then run. This target
+  first runs make test (pytest and Black), and builds only if both checks pass:
+
+      make release-windows
+
+  If GNU Make is not installed, the same builder can be run directly:
+
+      python make_release.py
+
+  Other Make targets:
+
+      make test             run tests and formatting checks
+      make clean            remove only output\release\
+      make android          not configured until an Android framework is chosen
+
+  "make release" is an alias for "make release-windows". The Android target
+  intentionally reports that no build is configured yet; it does not install
+  tools or create an APK.
+
+  The build creates output\release\modaud.exe, bundles FFmpeg and FFprobe,
+  and stages a three-line sample project. The Makefile route needs GNU Make;
+  running the released executable does not require Python, Make or FFmpeg on
+  PATH. See docs\audio-concat-study.md, section 16.
 
 
 ------------------------------------------------------------------------------
@@ -178,6 +214,15 @@ terminal in the dice-skit folder:
 
   4. Listen to output\master\master_dialogues.mp3. The console summary and
      output\log\run<date-time>.log say what was used and what was skipped.
+
+After building the Windows release, try its bundled sample:
+
+      output\release\modaud.exe output\release\sample_project dry_run=1
+      output\release\modaud.exe output\release\sample_project
+
+For another project, pass that project's folder as the first argument.
+Quote paths containing spaces. Remaining arguments are the usual
+stitch_mp3.py options, such as strict=0 or dry_run=1.
 
 A project from before 2026-10-08, with human_gen\, machine_gen\ and the
 other folders at the top, is moved into the input / in-out / output layout
@@ -240,6 +285,18 @@ settings.py  (the settings file)
 generate_mp3.py  (TTS; off by default)
 
   python generate_mp3.py      Prints how to enable it; see section 7.
+
+modaud.exe  (Windows console release; built by "make release")
+
+  modaud.exe <project-folder> [stitch options]
+
+  Example:
+      output\release\modaud.exe "C:\Projects\my audio" strict=0
+
+  The project folder contains input\dialogues_new.csv and optionally
+  dice-skit.json. The executable uses its sibling ffmpeg\ folder, writes
+  output to the project's configured folders, and accepts stitch_mp3.py
+  options. TTS generation and the GUI are not part of this prototype.
 
 
 ------------------------------------------------------------------------------
@@ -390,6 +447,15 @@ Programs (run these)
   settings.py          Loads and checks dice-skit.json. Holds every setting's
                        default, allowed range and help text. Run it to list
                        the settings, or "write" to refresh the file.
+  modaud.py            Console entry point packaged as
+                       output\release\modaud.exe. Takes a project folder,
+                       then stitch_mp3.py options.
+  make_release.py      Builds the Windows executable, bundles FFmpeg tools,
+                       and stages the sample project.
+  Makefile             test, release-windows (also release), android and clean
+                       targets.
+  requirements-build.txt
+                       PyInstaller required only on the release build machine.
 
 Modules (used by the programs)
   audio_common.py      Shared foundation: settings values, the CSV loader,
@@ -430,6 +496,7 @@ Folders (study sec. 14)
     master\              The finished master.
     work\                Caches and generated silence.
     log\                 One log file per run. Kept by "clean".
+    release\             Windows executable release and sample project.
   docs\                audio-concat-study.md: setup guide, design, decisions
                        and test results.
   backup\              Numbered snapshots (v1, v2, ...) of every source file,
@@ -473,6 +540,9 @@ Folders (study sec. 14)
                                 malformed; the block says which.
   ffmpeg not found after        Restart the terminal (or VS Code completely).
   installing
+  RELEASE ERROR: ... was not    Add the FFmpeg bin folder to PATH, including
+  found on PATH                 both ffmpeg.exe and ffprobe.exe, then rerun
+                                make release.
   SSLError: certificate         Corporate network:
   verify failed                 python -m pip install --user truststore
 
