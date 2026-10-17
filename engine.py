@@ -136,7 +136,7 @@ def open_project(folder):
     Make `folder` the active project and summarise it.
 
     Raises ProjectError when the folder does not exist, and
-    settings.SettingsError when its dice-skit.json is invalid.
+    settings.SettingsError when its config.json is invalid.
     """
     global _project
 
@@ -276,7 +276,7 @@ def build(strict=None, loudness=None, rows=None, on_event=None):
     """
     Build the master.
 
-    strict / loudness override dice-skit.json for this run when not None.
+    strict / loudness override config.json for this run when not None.
     rows limits the build to the first N rows.
     """
     args = []
@@ -430,7 +430,7 @@ class _EventSink(io.TextIOBase):
 
 def load_settings():
     """
-    (values, sources) for the active project's dice-skit.json.
+    (values, sources) for the active project's config.json.
     """
     _require_project()
 

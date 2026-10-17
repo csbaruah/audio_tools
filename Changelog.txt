@@ -6,6 +6,25 @@ Sep 11 entries are UTC). Section numbers (sec.) refer to
 docs\audio-concat-study.md.
 
 
+2026-10-17  Release guide includes the main user instructions (sec. 16)
+    Each Windows release README now includes the main README's command-line,
+    settings, CSV and troubleshooting sections, keeping the shipped guide
+    aligned with the current instructions.
+
+2026-10-17  Unified project settings and CSV configuration
+    A single config.json now holds all settings and names the dialogue CSV.
+    The deprecated dice-skit.json is no longer read. The release sample uses
+    input\dialogues.csv; both normal stitching and modaud use that setting.
+
+2026-10-17  GitHub Actions runs the Make test target
+    Pull requests to main and pushes to main now install GNU Make and run
+    "make test", keeping automated checks consistent with local development.
+
+2026-10-17  Named test results and saved test logs
+    "make test" now shows each pytest name and pass/skip/fail result, then
+    checks formatting. Both command outputs are streamed to the terminal and
+    saved in a timestamped output\log\tests-*.log file.
+
 2026-10-17  Make targets for test, Windows release and cleanup
     Added make test; make release-windows runs tests before packaging (make
     release is an alias); make clean removes only output\release\. make android

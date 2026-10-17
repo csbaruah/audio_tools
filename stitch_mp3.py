@@ -11,7 +11,7 @@ TTS generation lives in generate_mp3.py and is currently disabled.
     python stitch_mp3.py 10 strict=0      # both, in either order
     python stitch_mp3.py dry_run=1        # run every check, stitch nothing
 Arguments are optional and order-independent. `strict=1` (the default, and the
-value of run.strict in dice-skit.json) aborts before writing anything if
+value of run.strict in config.json) aborts before writing anything if
 any expected dialogue MP3 is missing, corrupt, or in a mismatched audio format.
 `strict=0` skips those inputs and stitches the rest, reporting what it left out.
 
@@ -53,7 +53,7 @@ will be synthesised on demand; "N" is accepted in either, though in
 "filler_after" it is merely a louder way of leaving the cell empty.
 
 Every dialogue line is first brought to one loudness (loudness.py; turn it
-off for a run with loudness=0). Settings come from dice-skit.json through
+off for a run with loudness=0). Settings come from config.json through
 settings.py.
 
 A row may also name a background track in "background_score", with a cue
@@ -1873,7 +1873,7 @@ def main():
         print()
         print("To stitch the usable files anyway, either:")
         print("    python stitch_mp3.py strict=0")
-        print('or set "run": {"strict": false} in dice-skit.json.')
+        print('or set "run": {"strict": false} in config.json.')
         print()
 
         return 1

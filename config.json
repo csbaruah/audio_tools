@@ -8,6 +8,8 @@
   ],
   "version": 1,
   "_version": "File format version. Do not edit.",
+  "csv_file": "dialogues_new.csv",
+  "_csv_file": "CSV filename inside the configured input folder; rows define dialogue order.",
   "run": {
     "_comment": "How a build behaves.",
     "strict": true,
@@ -40,8 +42,6 @@
     "_in_out": "Top-level folder for material one stage writes and another reads: machine_gen.",
     "output": "output",
     "_output": "Top-level output folder: master, work and log. Everything in it can be rebuilt.",
-    "csv": "dialogues_new.csv",
-    "_csv": "The script, inside input: lines, order, fillers, background scores.",
     "human_gen": "human_gen",
     "_human_gen": "Recorded takes and named sound files, inside input.",
     "machine_gen": "machine_gen",

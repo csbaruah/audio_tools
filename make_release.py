@@ -1,6 +1,7 @@
 """Build the Windows console release and stage its sample project."""
 
 import csv
+import json
 import os
 import shutil
 import stat
@@ -68,7 +69,7 @@ SAMPLE_COLUMNS = (
     "score_cues",
 )
 
-RELEASE_README = """MODAUD WINDOWS CONSOLE RELEASE
+RELEASE_README_INTRO = """MODAUD WINDOWS CONSOLE RELEASE
 ==============================
 
 The sample_project folder contains a small example with three recorded lines,
@@ -87,19 +88,62 @@ To use another project, pass its folder as the first argument:
   .\\modaud.exe "C:\\Projects\\my audio"
   .\\modaud.exe "C:\\Projects\\my audio" strict=0
 
-The project folder must contain input\\dialogues_new.csv. Its optional
-dice-skit.json controls settings and paths. The master and run log are written
-to the configured output folders. Existing stitch_mp3.py options are accepted
-after the project-folder argument.
+The project folder must contain config.json and the CSV named by its
+"csv_file" value inside input. config.json controls settings and paths.
+The master and run log are written to the configured output folders.
+Existing stitch_mp3.py options are accepted after the project-folder argument.
 
 FFmpeg and FFprobe are bundled in the sibling ffmpeg folder. Keep that folder
 beside modaud.exe. This console build stitches audio locally; TTS generation
 and GUI features are not included in this prototype.
 """
 
+RELEASE_README_SECTIONS = (
+    "4. COMMAND-LINE OPTIONS",
+    "5. SETTINGS FILE (config.json)",
+    "6. THE SCRIPT FILE (input\\<csv_file>)",
+    "9. TROUBLESHOOTING",
+)
+
 
 class ReleaseError(RuntimeError):
     """Raised when the release cannot be built safely."""
+
+
+def release_readme(project_root=PROJECT_ROOT):
+    """Build the release guide with the selected sections from the main README."""
+    readme = Path(project_root) / "README.txt"
+    try:
+        lines = readme.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        raise ReleaseError(f"could not read main README {readme}: {exc}") from exc
+
+    sections = []
+    for heading in RELEASE_README_SECTIONS:
+        try:
+            start = next(i for i, line in enumerate(lines) if line == heading)
+        except StopIteration as exc:
+            raise ReleaseError(
+                f"main README {readme} is missing section {heading!r}"
+            ) from exc
+
+        end = next(
+            (
+                i
+                for i in range(start + 1, len(lines))
+                if any(lines[i] == following for following in RELEASE_README_SECTIONS)
+                or (
+                    lines[i].startswith(tuple(f"{number}." for number in range(1, 10)))
+                    and i > start
+                    and lines[i].split(".", 1)[0].isdigit()
+                    and int(lines[i].split(".", 1)[0]) > int(heading.split(".", 1)[0])
+                )
+            ),
+            len(lines),
+        )
+        sections.append("\n".join(lines[start:end]).strip())
+
+    return RELEASE_README_INTRO.rstrip() + "\n\n\n" + "\n\n\n".join(sections) + "\n"
 
 
 def find_tool(name, path_value=None):
@@ -183,11 +227,25 @@ def write_sample_project(project_root, release_dir):
             raise ReleaseError(f"sample asset is missing: {source}")
         shutil.copy2(source, human_dir / filename)
 
-    shutil.copy2(Path(project_root) / "dice-skit.json", sample / "dice-skit.json")
+    config_path = Path(project_root) / "config.json"
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ReleaseError(
+            f"could not read project config {config_path}: {exc}"
+        ) from exc
+    config["csv_file"] = "dialogues.csv"
+    (sample / "config.json").write_text(
+        json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
 
-    with (input_dir / "dialogues_new.csv").open(
-        "w", encoding="utf-8-sig", newline=""
-    ) as handle:
+    csv_path = input_dir / "dialogues.csv"
+    stale_csv = input_dir / "dialogues_new.csv"
+    if csv_path.name != stale_csv.name:
+        stale_csv.unlink(missing_ok=True)
+    (sample / "dice-skit.json").unlink(missing_ok=True)
+
+    with csv_path.open("w", encoding="utf-8-sig", newline="") as handle:
         writer = csv.writer(handle)
         writer.writerow(SAMPLE_COLUMNS)
         writer.writerows(SAMPLE_ROWS)
@@ -206,7 +264,9 @@ def build_release(project_root=PROJECT_ROOT, release_dir=RELEASE_DIR):
     release_dir.mkdir(parents=True, exist_ok=True)
     copy_ffmpeg_tools(release_dir)
     write_sample_project(project_root, release_dir)
-    (release_dir / "README.txt").write_text(RELEASE_README, encoding="utf-8")
+    (release_dir / "README.txt").write_text(
+        release_readme(project_root), encoding="utf-8"
+    )
 
     with tempfile.TemporaryDirectory(prefix="modaud-build-") as temporary:
         temporary = Path(temporary)
@@ -226,6 +286,8 @@ def build_release(project_root=PROJECT_ROOT, release_dir=RELEASE_DIR):
             str(temporary / "build"),
             "--specpath",
             str(temporary / "spec"),
+            "--add-data",
+            f"{project_root / 'config.json'}{os.pathsep}.",
             str(project_root / "modaud.py"),
         ]
 

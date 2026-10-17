@@ -11,7 +11,9 @@ import stitch_mp3
 USAGE = """Usage:
     modaud.exe <project-folder> [stitch options]
 
-The project folder must contain dice-skit.json (optional) and input\\dialogues_new.csv.
+The project folder must contain config.json and input\\<csv_file>.
+config.json names the CSV file and contains all project settings.
+The old dice-skit.json filename is deprecated.
 Stitch options are the same as stitch_mp3.py, for example:
     modaud.exe "C:\\Projects\\my audio" dry_run=1
     modaud.exe "C:\\Projects\\my audio" strict=0

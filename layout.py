@@ -19,7 +19,7 @@ deliberately conservative, since it moves the user's recordings:
   * It moves, never copies or deletes, so nothing is duplicated or lost.
   * It never overwrites. If any destination already exists, it moves NOTHING
     and reports why, so a project is never left half-moved.
-  * It rewrites dice-skit.json's paths only after every move succeeded.
+  * It rewrites config.json's paths only after every move succeeded.
   * Every move is listed on the console and in a migrate log.
 
 clean() deletes the contents of the master and work folders, and nothing
@@ -42,7 +42,6 @@ class LayoutError(RuntimeError):
 # Old top-level names, and where each goes in the new layout, relative to the
 # project. The old master folder's contents go into output/master.
 _OLD_TO_NEW = [
-    ("dialogues_new.csv", "input/dialogues_new.csv"),
     ("human_gen", "input/human_gen"),
     ("machine_gen", "in-out/machine_gen"),
     ("dialogues-mp3", "output/master"),
@@ -50,7 +49,7 @@ _OLD_TO_NEW = [
     ("log", "output/log"),
 ]
 
-# Old dice-skit.json path keys, with the values they had by default. A file
+# Old config path keys, with the values they had by default. A file
 # still holding these (or a subset) is an old-layout file.
 _OLD_PATH_DEFAULTS = {
     "csv": "dialogues_new.csv",
@@ -68,11 +67,12 @@ _NEW_ONLY_KEYS = {"input", "in_out", "master_dir"}
 # DETECTION
 # ============================================================
 
+
 def _settings_paths(project):
     """
-    The "paths" object in the project's dice-skit.json, or None.
+    The "paths" object in the project's config.json, or None.
     """
-    path = Path(project) / "dice-skit.json"
+    path = Path(project) / "config.json"
 
     if not path.exists():
         return None
@@ -89,7 +89,7 @@ def _settings_paths(project):
 
 def settings_are_old(project):
     """
-    True when dice-skit.json still describes the old layout: it has a paths
+    True when config.json still describes the old layout: it has a paths
     section with none of the new top-level keys, and its output value is the
     old master folder.
     """
@@ -112,11 +112,23 @@ def old_items(project):
     """
     project = Path(project)
 
-    return [
+    csv_file = "dialogues_new.csv"
+    config_path = project / "config.json"
+    if config_path.exists():
+        import settings
+
+        try:
+            csv_file = settings.load_project_config(config_path)
+        except settings.SettingsError as exc:
+            raise LayoutError(str(exc)) from exc
+
+    items = [(project / csv_file, project / "input" / csv_file)]
+    items.extend(
         (project / old, project / new)
         for old, new in _OLD_TO_NEW
         if (project / old).exists()
-    ]
+    )
+    return [(old, new) for old, new in items if old.exists()]
 
 
 def needs_migration(project):
@@ -135,6 +147,7 @@ def needs_migration(project):
 # ============================================================
 # MIGRATION
 # ============================================================
+
 
 def migrate(project, say=print):
     """
@@ -157,7 +170,8 @@ def migrate(project, say=print):
     if clashes:
         raise LayoutError(
             "cannot move to the new folder layout, because these already "
-            "exist: " + ", ".join(str(p.relative_to(project)) for p in clashes)
+            "exist: "
+            + ", ".join(str(p.relative_to(project)) for p in clashes)
             + ". Nothing was moved."
         )
 
@@ -204,7 +218,7 @@ def migrate(project, say=print):
         temp = path.with_name(f"_{path.name}.tmp")
         temp.write_text(text, encoding="utf-8")
         os.replace(temp, path)
-        say("    dice-skit.json: paths updated to the new layout")
+        say("    config.json: paths updated to the new layout")
 
     for folder in ("input", "in-out", "output"):
         (project / folder).mkdir(exist_ok=True)
@@ -235,7 +249,7 @@ def _remove_empty_tree(folder):
 
 def _rewritten_settings(project):
     """
-    (path, new text) for dice-skit.json with its paths section converted to
+    (path, new text) for config.json with its paths section converted to
     the new layout, or None when no change is needed.
 
     Old values that were the old defaults become the new defaults (the key is
@@ -244,7 +258,7 @@ def _rewritten_settings(project):
     """
     import settings
 
-    path = Path(project) / "dice-skit.json"
+    path = Path(project) / "config.json"
 
     if not settings_are_old(project):
         return None
@@ -252,9 +266,10 @@ def _rewritten_settings(project):
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        raise LayoutError(f"dice-skit.json could not be read to update its paths: {exc}")
+        raise LayoutError(f"config.json could not be read to update its paths: {exc}")
 
     old = data.get("paths", {})
+    csv_file = data.get("csv_file", old.get("csv", "dialogues_new.csv"))
     kept = {}
 
     for key, value in old.items():
@@ -274,6 +289,7 @@ def _rewritten_settings(project):
         kept[key] = value
 
     values, _ = settings.load(Path("__no_such_file__"))
+    values["paths"]["csv"] = csv_file
     values["paths"].update(kept)
 
     # Keep every other section exactly as the user had it.
@@ -301,15 +317,18 @@ def _write_migration_log(project, done, settings_changed):
         "",
         *[f"  {old}  ->  {new}" for old, new in done],
         "",
-        f"dice-skit.json paths updated: {'yes' if settings_changed else 'no'}",
+        f"config.json paths updated: {'yes' if settings_changed else 'no'}",
     ]
 
-    (log_dir / f"migrate{stamp}.log").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (log_dir / f"migrate{stamp}.log").write_text(
+        "\n".join(lines) + "\n", encoding="utf-8"
+    )
 
 
 # ============================================================
 # CLEAN
 # ============================================================
+
 
 def _inside(path, parent):
     try:
